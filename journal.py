@@ -1,8 +1,10 @@
+from datetime import datetime
+import os
+import matplotlib.pyplot as plt
 from flask import Flask, render_template_string, request, redirect, url_for
 import pandas as pd
-import matplotlib.pyplot as plt
-import os
-from datetime import datetime
+import matplotlib
+matplotlib.use('Agg')  # Use non-GUI backend for server
 
 app = Flask(__name__)
 
@@ -43,6 +45,22 @@ def parse_all_csv(folder):
     return pd.DataFrame()
 
 
+def get_account_list(df):
+    """Get list of unique accounts"""
+    if df.empty or 'Account' not in df.columns:
+        return []
+    return sorted(df['Account'].unique().tolist())
+
+
+def filter_by_account(df, account):
+    """Filter dataframe by account"""
+    if not account or account == 'all':
+        return df
+    if 'Account' in df.columns:
+        return df[df['Account'] == account]
+    return df
+
+
 def calculate_stats(df):
     """Calculate comprehensive trading statistics"""
     if df.empty or 'Profit' not in df.columns:
@@ -63,7 +81,7 @@ def calculate_stats(df):
         'avg_loss': f"${losses['Profit'].mean():.2f}" if len(losses) > 0 else "$0.00",
         'largest_win': f"${df['Profit'].max():.2f}",
         'largest_loss': f"${df['Profit'].min():.2f}",
-        'net_profit': f"${df['Cum. net profit'].iloc[-1]:.2f}" if 'Cum. net profit' in df.columns else "$0.00",
+        'net_profit': f"${df['Cum. net profit'].iloc[-1]:.2f}" if 'Cum. net profit' in df.columns and len(df) > 0 else "$0.00",
     }
 
     # Risk/Reward Ratio
@@ -104,7 +122,27 @@ def get_strategy_stats(df):
     return strategies
 
 
-def create_charts(df):
+def get_account_comparison(df):
+    """Compare performance across accounts"""
+    if df.empty or 'Account' not in df.columns:
+        return {}
+
+    accounts = {}
+    for account in df['Account'].unique():
+        acc_df = df[df['Account'] == account]
+        wins = len(acc_df[acc_df['Profit'] > 0])
+        total = len(acc_df)
+        accounts[account] = {
+            'trades': total,
+            'wins': wins,
+            'win_rate': f"{(wins/total*100):.1f}%" if total > 0 else "0%",
+            'profit': f"${acc_df['Profit'].sum():.2f}",
+            'net_profit': f"${acc_df['Cum. net profit'].iloc[-1]:.2f}" if 'Cum. net profit' in acc_df.columns and len(acc_df) > 0 else "$0.00"
+        }
+    return accounts
+
+
+def create_charts(df, account_filter='all'):
     """Generate all trading charts"""
     if df.empty:
         return {}
@@ -114,10 +152,12 @@ def create_charts(df):
     # 1. Cumulative Profit Curve
     if 'Exit time' in df.columns and 'Cum. net profit' in df.columns:
         plt.figure(figsize=(12, 5))
-        plt.plot(df['Exit time'], df['Cum. net profit'],
-                 marker='o', linestyle='-', linewidth=2)
-        plt.title('Cumulative Net Profit Over Time',
-                  fontsize=14, fontweight='bold')
+        plt.plot(df['Exit time'], df['Cum. net profit'], marker='o',
+                 linestyle='-', linewidth=2, color='#007bff')
+        title = 'Cumulative Net Profit Over Time'
+        if account_filter != 'all':
+            title += f' - {account_filter}'
+        plt.title(title, fontsize=14, fontweight='bold')
         plt.xlabel('Exit Time')
         plt.ylabel('Cumulative Profit ($)')
         plt.grid(True, alpha=0.3)
@@ -133,8 +173,8 @@ def create_charts(df):
         wins = len(df[df['Profit'] > 0])
         losses = len(df[df['Profit'] < 0])
         break_even = len(df[df['Profit'] == 0])
-        plt.bar(['Wins', 'Losses', 'Break Even'], [
-                wins, losses, break_even], color=['green', 'red', 'gray'])
+        plt.bar(['Wins', 'Losses', 'Break Even'], [wins, losses, break_even],
+                color=['#38ef7d', '#f45c43', '#999'])
         plt.title('Trade Outcomes', fontsize=14, fontweight='bold')
         plt.ylabel('Number of Trades')
         plt.tight_layout()
@@ -149,6 +189,7 @@ def create_charts(df):
         plt.title('Profit Distribution', fontsize=14, fontweight='bold')
         plt.xlabel('Profit ($)')
         plt.ylabel('Frequency')
+        plt.axvline(0, color='red', linestyle='--', linewidth=1, alpha=0.5)
         plt.grid(True, alpha=0.3, axis='y')
         plt.tight_layout()
         plt.savefig(os.path.join(CHART_FOLDER, 'profit_dist.png'), dpi=100)
@@ -159,13 +200,33 @@ def create_charts(df):
     if 'Strategy' in df.columns and 'Profit' in df.columns:
         strategy_prof = df.groupby('Strategy')['Profit'].sum().sort_values()
         plt.figure(figsize=(10, 5))
-        strategy_prof.plot(kind='barh', color='teal')
+        colors = ['#38ef7d' if x >
+                  0 else '#f45c43' for x in strategy_prof.values]
+        strategy_prof.plot(kind='barh', color=colors)
         plt.title('Profit by Strategy', fontsize=14, fontweight='bold')
         plt.xlabel('Total Profit ($)')
+        plt.axvline(0, color='black', linewidth=0.8)
         plt.tight_layout()
         plt.savefig(os.path.join(CHART_FOLDER, 'strategy_profit.png'), dpi=100)
         plt.close()
         charts['strategy_profit'] = 'strategy_profit.png'
+
+    # 5. Account Comparison (if multiple accounts and viewing all)
+    if account_filter == 'all' and 'Account' in df.columns:
+        account_prof = df.groupby('Account')['Profit'].sum().sort_values()
+        if len(account_prof) > 1:
+            plt.figure(figsize=(10, 5))
+            colors = ['#38ef7d' if x >
+                      0 else '#f45c43' for x in account_prof.values]
+            account_prof.plot(kind='barh', color=colors)
+            plt.title('Profit by Account', fontsize=14, fontweight='bold')
+            plt.xlabel('Total Profit ($)')
+            plt.axvline(0, color='black', linewidth=0.8)
+            plt.tight_layout()
+            plt.savefig(os.path.join(
+                CHART_FOLDER, 'account_profit.png'), dpi=100)
+            plt.close()
+            charts['account_profit'] = 'account_profit.png'
 
     return charts
 
@@ -178,14 +239,17 @@ HTML_TEMPLATE = """
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f5f5; padding: 20px; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .container { max-width: 1400px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         h1 { color: #333; margin-bottom: 20px; border-bottom: 3px solid #007bff; padding-bottom: 10px; }
         h2 { color: #555; margin-top: 30px; margin-bottom: 15px; font-size: 1.3em; }
-        .upload-section { background: #f9f9f9; padding: 20px; border-radius: 6px; margin-bottom: 30px; }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; flex-wrap: wrap; gap: 15px; }
+        .upload-section { background: #f9f9f9; padding: 20px; border-radius: 6px; flex: 1; min-width: 300px; }
         .upload-section form { display: flex; gap: 10px; }
-        .upload-section input[type="file"] { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
-        .upload-section button { background: #007bff; color: white; padding: 8px 20px; border: none; border-radius: 4px; cursor: pointer; }
+        .upload-section input[type="file"] { padding: 8px; border: 1px solid #ddd; border-radius: 4px; flex: 1; }
+        .upload-section button { background: #007bff; color: white; padding: 8px 20px; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; }
         .upload-section button:hover { background: #0056b3; }
+        .account-filter { background: #f9f9f9; padding: 20px; border-radius: 6px; min-width: 250px; }
+        .account-filter select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }
         .stat-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 6px; text-align: center; }
         .stat-card.positive { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
@@ -199,17 +263,33 @@ HTML_TEMPLATE = """
         table th { background: #007bff; color: white; padding: 12px; text-align: left; }
         table td { padding: 10px; border-bottom: 1px solid #ddd; }
         table tr:hover { background: #f5f5f5; }
+        .account-label { display: inline-block; padding: 4px 8px; background: #007bff; color: white; border-radius: 4px; font-size: 0.85em; margin-left: 10px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📊 Futures Trade Journal</h1>
+        <h1>📊 Futures Trade Journal{% if current_account and current_account != 'all' %}<span class="account-label">{{ current_account }}</span>{% endif %}</h1>
         
-        <div class="upload-section">
-            <form method="post" enctype="multipart/form-data" action="/upload">
-                <input type="file" name="file" accept=".csv" required>
-                <button type="submit">Upload CSV</button>
-            </form>
+        <div class="top-bar">
+            <div class="upload-section">
+                <form method="post" enctype="multipart/form-data" action="/upload">
+                    <input type="file" name="file" accept=".csv" required>
+                    <button type="submit">Upload CSV</button>
+                </form>
+            </div>
+            
+            {% if accounts %}
+                <div class="account-filter">
+                    <form method="get" action="/">
+                        <select name="account" onchange="this.form.submit()">
+                            <option value="all" {% if current_account == 'all' %}selected{% endif %}>All Accounts</option>
+                            {% for acc in accounts %}
+                                <option value="{{ acc }}" {% if current_account == acc %}selected{% endif %}>{{ acc }}</option>
+                            {% endfor %}
+                        </select>
+                    </form>
+                </div>
+            {% endif %}
         </div>
         
         {% if stats %}
@@ -257,6 +337,30 @@ HTML_TEMPLATE = """
                 </div>
             </div>
             
+            {% if account_comparison and current_account == 'all' %}
+                <h2>Account Comparison</h2>
+                <table>
+                    <tr>
+                        <th>Account</th>
+                        <th>Trades</th>
+                        <th>Wins</th>
+                        <th>Win Rate</th>
+                        <th>Total Profit</th>
+                        <th>Net Profit</th>
+                    </tr>
+                    {% for account, data in account_comparison.items() %}
+                        <tr>
+                            <td><strong><a href="/?account={{ account }}" style="text-decoration:none;color:#007bff;">{{ account }}</a></strong></td>
+                            <td>{{ data.trades }}</td>
+                            <td>{{ data.wins }}</td>
+                            <td>{{ data.win_rate }}</td>
+                            <td style="color: {% if data.profit[1] == '-' %}red{% else %}green{% endif %};">{{ data.profit }}</td>
+                            <td style="color: {% if data.net_profit[1] == '-' %}red{% else %}green{% endif %};">{{ data.net_profit }}</td>
+                        </tr>
+                    {% endfor %}
+                </table>
+            {% endif %}
+            
             {% if strategy_stats %}
                 <h2>Strategy Breakdown</h2>
                 <table>
@@ -283,22 +387,27 @@ HTML_TEMPLATE = """
             <div class="charts">
                 {% if charts.profit_curve %}
                     <div class="chart-container">
-                        <img src="{{ url_for('static', filename=charts.profit_curve) }}?v={{ random() }}" alt="Profit Curve">
+                        <img src="{{ url_for('static', filename=charts.profit_curve) }}?v={{ timestamp }}" alt="Profit Curve">
                     </div>
                 {% endif %}
                 {% if charts.win_loss %}
                     <div class="chart-container">
-                        <img src="{{ url_for('static', filename=charts.win_loss) }}?v={{ random() }}" alt="Win/Loss">
+                        <img src="{{ url_for('static', filename=charts.win_loss) }}?v={{ timestamp }}" alt="Win/Loss">
                     </div>
                 {% endif %}
                 {% if charts.profit_dist %}
                     <div class="chart-container">
-                        <img src="{{ url_for('static', filename=charts.profit_dist) }}?v={{ random() }}" alt="Profit Distribution">
+                        <img src="{{ url_for('static', filename=charts.profit_dist) }}?v={{ timestamp }}" alt="Profit Distribution">
                     </div>
                 {% endif %}
                 {% if charts.strategy_profit %}
                     <div class="chart-container">
-                        <img src="{{ url_for('static', filename=charts.strategy_profit) }}?v={{ random() }}" alt="Strategy Profit">
+                        <img src="{{ url_for('static', filename=charts.strategy_profit) }}?v={{ timestamp }}" alt="Strategy Profit">
+                    </div>
+                {% endif %}
+                {% if charts.account_profit %}
+                    <div class="chart-container">
+                        <img src="{{ url_for('static', filename=charts.account_profit) }}?v={{ timestamp }}" alt="Account Profit">
                     </div>
                 {% endif %}
             </div>
@@ -314,16 +423,27 @@ HTML_TEMPLATE = """
 @app.route("/", methods=["GET"])
 def index():
     df = parse_all_csv(UPLOAD_FOLDER)
-    stats = calculate_stats(df)
-    strategy_stats = get_strategy_stats(df)
-    charts = create_charts(df)
+    accounts = get_account_list(df)
+    current_account = request.args.get('account', 'all')
+
+    # Filter by account
+    filtered_df = filter_by_account(df, current_account)
+
+    stats = calculate_stats(filtered_df)
+    strategy_stats = get_strategy_stats(filtered_df)
+    account_comparison = get_account_comparison(
+        df) if current_account == 'all' else None
+    charts = create_charts(filtered_df, current_account)
 
     return render_template_string(
         HTML_TEMPLATE,
         stats=stats,
         strategy_stats=strategy_stats,
+        account_comparison=account_comparison,
         charts=charts,
-        random=lambda: datetime.now().timestamp()
+        accounts=accounts,
+        current_account=current_account,
+        timestamp=datetime.now().timestamp()
     )
 
 
