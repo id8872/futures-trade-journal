@@ -1,5 +1,5 @@
 import dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import matplotlib.pyplot as plt
 from flask import Flask, render_template_string, request, jsonify
@@ -72,33 +72,48 @@ def insert_trades_from_csv(file_path):
 def get_trades_df(account='all', start_date=None, end_date=None):
     print("About to query Supabase...")
     query = supabase.table('trades').select('*')
-    print("Initial query object created.")
+
+    # Default to start of current week (Monday) if no dates specified
+    if not start_date and not end_date:
+        today = datetime.now()
+        days_since_monday = today.weekday()
+        monday = today - timedelta(days=days_since_monday)
+        start_date = monday.strftime('%Y-%m-%d')
+        print(
+            f"No date filters provided, defaulting to current week from {start_date}")
+
     if account and account != 'all':
         print(f"Filtering by account: {account}")
         query = query.eq('account', account)
+
     if start_date:
         start_date_iso = f"{start_date}T00:00:00Z"
         print(f"Filtering by start_date: {start_date_iso}")
         query = query.gte('exit_time', start_date_iso)
+
     if end_date:
         end_date_iso = f"{end_date}T23:59:59Z"
         print(f"Filtering by end_date: {end_date_iso}")
         query = query.lte('exit_time', end_date_iso)
+
+    query = query.order('exit_time', desc=True)
+
     try:
         response = query.execute()
         print("Supabase response received.")
-        print("Response data:", response.data)
+        print(f"Number of rows: {len(response.data) if response.data else 0}")
     except Exception as e:
         print("Supabase query error:", e)
         return pd.DataFrame()
+
     if response.data:
         df = pd.DataFrame(response.data)
         for col in ['entry_time', 'exit_time']:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col])
         print("Rows returned:", len(df))
-        print(df.head())
         return df
+
     print("No data received from Supabase.")
     return pd.DataFrame()
 
@@ -108,14 +123,6 @@ def get_account_list():
     accounts = list(set([row['account']
                     for row in response.data if row.get('account')]))
     return sorted(accounts)
-
-
-def filter_by_account(df, account):
-    if not account or account == 'all':
-        return df
-    if 'account' in df.columns:
-        return df[df['account'] == account]
-    return df
 
 
 def calculate_stats(df):
@@ -270,12 +277,48 @@ HTML_TEMPLATE = """
 <head>
     <title>Futures Trade Journal</title>
     <style>
-        /* Add your previous CSS here */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { font-size: 2rem; margin-bottom: 20px; color: #111; }
+        .account-label { background: #007bff; color: white; padding: 4px 12px; border-radius: 4px; font-size: 0.9rem; margin-left: 10px; }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; flex-wrap: wrap; gap: 15px; }
+        .upload-section form { display: flex; gap: 10px; align-items: center; }
+        .upload-section input[type="file"] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .upload-section button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; }
+        .upload-section button:hover { background: #0056b3; }
+        .upload-section button:disabled { background: #ccc; cursor: not-allowed; }
+        #upload-status { font-size: 0.9rem; margin-top: 5px; }
+        .account-filter form { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .account-filter select, .account-filter input[type="date"] { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.95rem; }
+        .account-filter label { font-size: 0.9rem; font-weight: 500; }
+        .quick-filters { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+        .btn-quick { padding: 8px 16px; background: #f0f0f0; border: 1px solid #ddd; border-radius: 4px; text-decoration: none; color: #333; font-size: 0.9rem; transition: all 0.2s; }
+        .btn-quick:hover { background: #e0e0e0; border-color: #bbb; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
+        .stat-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .stat-card h3 { font-size: 0.85rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .stat-card .value { font-size: 1.5rem; font-weight: 600; color: #111; }
+        .section { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 25px; }
+        .section h2 { font-size: 1.3rem; margin-bottom: 15px; color: #111; }
+        .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px; }
+        .chart-item img { width: 100%; height: auto; border-radius: 4px; }
+        table { width: 100%; border-collapse: collapse; }
+        table th, table td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        table th { background: #f9f9f9; font-weight: 600; font-size: 0.9rem; color: #666; }
+        table td { font-size: 0.95rem; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>📊 Futures Trade Journal{% if current_account and current_account != 'all' %}<span class="account-label">{{ current_account }}</span>{% endif %}</h1>
+        
+        <div class="quick-filters">
+            <a href="/?start_date={{ today }}&end_date={{ today }}" class="btn-quick">Today</a>
+            <a href="/" class="btn-quick">This Week</a>
+            <a href="/?start_date={{ first_of_month }}" class="btn-quick">This Month</a>
+            <a href="/?start_date=&end_date=" class="btn-quick">All Time</a>
+        </div>
         
         <div class="top-bar">
             <div class="upload-section">
@@ -283,21 +326,21 @@ HTML_TEMPLATE = """
                     <input type="file" name="file" id="file-input" accept=".csv" required>
                     <button id="upload-btn" type="submit">Upload CSV</button>
                 </form>
-                <div id="upload-status" style="margin-top:10px; font-weight:bold;"></div>
+                <div id="upload-status"></div>
             </div>
             
             {% if accounts %}
                 <div class="account-filter">
-                    <form method="get" action="/" id="filter-form">
+                    <form method="get" action="/">
                         <select name="account" onchange="this.form.submit()">
                             <option value="all" {% if current_account == 'all' %}selected{% endif %}>All Accounts</option>
                             {% for acc in accounts %}
                                 <option value="{{ acc }}" {% if current_account == acc %}selected{% endif %}>{{ acc }}</option>
                             {% endfor %}
                         </select>
-                        <label for="start_date">From: </label>
+                        <label for="start_date">From:</label>
                         <input type="date" name="start_date" value="{{ start_date|default('') }}" onchange="this.form.submit()">
-                        <label for="end_date">To: </label>
+                        <label for="end_date">To:</label>
                         <input type="date" name="end_date" value="{{ end_date|default('') }}" onchange="this.form.submit()">
                     </form>
                 </div>
@@ -305,7 +348,53 @@ HTML_TEMPLATE = """
         </div>
         
         {% if stats %}
-            <!-- Existing stats, account comparison and charts HTML -->
+            <div class="stats-grid">
+                <div class="stat-card"><h3>Total Trades</h3><div class="value">{{ stats.total_trades }}</div></div>
+                <div class="stat-card"><h3>Win Rate</h3><div class="value">{{ stats.win_rate }}</div></div>
+                <div class="stat-card"><h3>Net Profit</h3><div class="value">{{ stats.net_profit }}</div></div>
+                <div class="stat-card"><h3>Avg Profit</h3><div class="value">{{ stats.avg_profit }}</div></div>
+                <div class="stat-card"><h3>Risk/Reward</h3><div class="value">{{ stats.risk_reward }}</div></div>
+                <div class="stat-card"><h3>Expectancy</h3><div class="value">{{ stats.expectancy }}</div></div>
+            </div>
+            
+            {% if strategy_stats %}
+            <div class="section">
+                <h2>Strategy Performance</h2>
+                <table>
+                    <thead><tr><th>Strategy</th><th>Trades</th><th>Win Rate</th><th>Profit</th></tr></thead>
+                    <tbody>
+                        {% for strategy, data in strategy_stats.items() %}
+                        <tr><td>{{ strategy }}</td><td>{{ data.trades }}</td><td>{{ data.win_rate }}</td><td>{{ data.profit }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+            
+            {% if account_comparison %}
+            <div class="section">
+                <h2>Account Comparison</h2>
+                <table>
+                    <thead><tr><th>Account</th><th>Trades</th><th>Win Rate</th><th>Profit</th><th>Net Profit</th></tr></thead>
+                    <tbody>
+                        {% for account, data in account_comparison.items() %}
+                        <tr><td>{{ account }}</td><td>{{ data.trades }}</td><td>{{ data.win_rate }}</td><td>{{ data.profit }}</td><td>{{ data.net_profit }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+            
+            {% if charts %}
+            <div class="section">
+                <h2>Charts</h2>
+                <div class="chart-grid">
+                    {% for name, path in charts.items() %}
+                    <div class="chart-item"><img src="/static/{{ path }}?t={{ timestamp }}" alt="{{ name }}"></div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
         {% else %}
             <p style="text-align: center; color: #999; margin-top: 40px;">No trades found for the selected filters.</p>
         {% endif %}
@@ -365,12 +454,15 @@ def index():
     df = get_trades_df(account, start_date, end_date)
     accounts = get_account_list()
 
-    # No need to filter in memory again if filtered by database
     stats = calculate_stats(df)
     strategy_stats = get_strategy_stats(df)
     account_comparison = get_account_comparison(
         df) if account == 'all' else None
     charts = create_charts(df, account)
+
+    # For quick filter buttons
+    today = datetime.now().strftime('%Y-%m-%d')
+    first_of_month = datetime.now().replace(day=1).strftime('%Y-%m-%d')
 
     return render_template_string(
         HTML_TEMPLATE,
@@ -382,6 +474,8 @@ def index():
         current_account=account,
         start_date=start_date,
         end_date=end_date,
+        today=today,
+        first_of_month=first_of_month,
         timestamp=datetime.now().timestamp()
     )
 
