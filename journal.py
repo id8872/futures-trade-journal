@@ -1,32 +1,31 @@
+import dotenv
 from datetime import datetime
 import os
 import matplotlib.pyplot as plt
 from flask import Flask, render_template_string, request, redirect, url_for
+from supabase import create_client, Client
 import pandas as pd
 import matplotlib
-matplotlib.use('Agg')  # Use non-GUI backend for server
+matplotlib.use('Agg')
+
+dotenv.load_dotenv()
 
 app = Flask(__name__)
 
-UPLOAD_FOLDER = 'data'
+# Supabase setup
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 CHART_FOLDER = 'static'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(CHART_FOLDER, exist_ok=True)
 
 
-def parse_all_csv(folder):
-    """Load and combine all CSV files from folder"""
-    df_list = []
-    for f in os.listdir(folder):
-        if f.endswith('.csv'):
-            try:
-                df = pd.read_csv(os.path.join(folder, f))
-                df_list.append(df)
-            except Exception as e:
-                print(f"Error loading {f}: {e}")
+def insert_trades_from_csv(file_path):
+    """Parse CSV and insert into Supabase"""
+    try:
+        df = pd.read_csv(file_path)
 
-    if df_list:
-        df = pd.concat(df_list, ignore_index=True)
         # Clean numeric columns
         for col in ['Profit', 'Cum. net profit', 'Entry price', 'Exit price', 'Qty', 'MAE', 'MFE']:
             if col in df.columns:
@@ -41,64 +40,112 @@ def parse_all_csv(folder):
         if 'Entry time' in df.columns:
             df['Entry time'] = pd.to_datetime(df['Entry time'])
 
-        return df
-    return pd.DataFrame()
+        # Insert rows
+        for idx, row in df.iterrows():
+            trade_data = {
+                'trade_number': int(row.get('Trade number', 0)) if pd.notna(row.get('Trade number')) else None,
+                'instrument': str(row.get('Instrument', '')),
+                'account': str(row.get('Account', '')),
+                'strategy': str(row.get('Strategy', '')),
+                'market_pos': str(row.get('Market pos.', '')),
+                'qty': int(row.get('Qty', 0)) if pd.notna(row.get('Qty')) else 0,
+                'entry_price': float(row.get('Entry price', 0)) if pd.notna(row.get('Entry price')) else 0,
+                'exit_price': float(row.get('Exit price', 0)) if pd.notna(row.get('Exit price')) else 0,
+                'entry_time': row.get('Entry time'),
+                'exit_time': row.get('Exit time'),
+                'entry_name': str(row.get('Entry name', '')),
+                'exit_name': str(row.get('Exit name', '')),
+                'profit': float(row.get('Profit', 0)) if pd.notna(row.get('Profit')) else 0,
+                'cum_net_profit': float(row.get('Cum. net profit', 0)) if pd.notna(row.get('Cum. net profit')) else 0,
+                'commission': float(row.get('Commission', 0)) if pd.notna(row.get('Commission')) else 0,
+                'mae': float(row.get('MAE', 0)) if pd.notna(row.get('MAE')) else 0,
+                'mfe': float(row.get('MFE', 0)) if pd.notna(row.get('MFE')) else 0,
+            }
+            supabase.table('trades').insert(trade_data).execute()
+
+        return True
+    except Exception as e:
+        print(f"Error inserting trades: {e}")
+        return False
 
 
-def get_account_list(df):
-    """Get list of unique accounts"""
-    if df.empty or 'Account' not in df.columns:
+def get_trades_df(account='all'):
+    """Fetch trades from Supabase"""
+    try:
+        if account and account != 'all':
+            response = supabase.table('trades').select(
+                '*').eq('account', account).execute()
+        else:
+            response = supabase.table('trades').select('*').execute()
+
+        if response.data:
+            df = pd.DataFrame(response.data)
+            # Convert datetime strings
+            for col in ['entry_time', 'exit_time']:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col])
+            return df
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"Error fetching trades: {e}")
+        return pd.DataFrame()
+
+
+def get_account_list():
+    """Get unique accounts from Supabase"""
+    try:
+        response = supabase.table('trades').select('account').execute()
+        accounts = list(set([row['account']
+                        for row in response.data if row.get('account')]))
+        return sorted(accounts)
+    except Exception as e:
+        print(f"Error getting accounts: {e}")
         return []
-    # Remove NaN values and convert to string, then get unique values
-    accounts = df['Account'].dropna().astype(str).unique().tolist()
-    return sorted(accounts)
 
 
 def filter_by_account(df, account):
     """Filter dataframe by account"""
     if not account or account == 'all':
         return df
-    if 'Account' in df.columns:
-        return df[df['Account'] == account]
+    if 'account' in df.columns:
+        return df[df['account'] == account]
     return df
 
 
 def calculate_stats(df):
     """Calculate comprehensive trading statistics"""
-    if df.empty or 'Profit' not in df.columns:
+    if df.empty or 'profit' not in df.columns:
         return None
 
-    wins = df[df['Profit'] > 0]
-    losses = df[df['Profit'] < 0]
+    wins = df[df['profit'] > 0]
+    losses = df[df['profit'] < 0]
 
     stats = {
         'total_trades': len(df),
         'winning_trades': len(wins),
         'losing_trades': len(losses),
-        'break_even': len(df[df['Profit'] == 0]),
+        'break_even': len(df[df['profit'] == 0]),
         'win_rate': f"{(len(wins) / len(df) * 100):.1f}%" if len(df) > 0 else "0%",
-        'total_profit': f"${df['Profit'].sum():.2f}",
-        'avg_profit': f"${df['Profit'].mean():.2f}",
-        'avg_win': f"${wins['Profit'].mean():.2f}" if len(wins) > 0 else "$0.00",
-        'avg_loss': f"${losses['Profit'].mean():.2f}" if len(losses) > 0 else "$0.00",
-        'largest_win': f"${df['Profit'].max():.2f}",
-        'largest_loss': f"${df['Profit'].min():.2f}",
-        'net_profit': f"${df['Cum. net profit'].iloc[-1]:.2f}" if 'Cum. net profit' in df.columns and len(df) > 0 else "$0.00",
+        'total_profit': f"${df['profit'].sum():.2f}",
+        'avg_profit': f"${df['profit'].mean():.2f}",
+        'avg_win': f"${wins['profit'].mean():.2f}" if len(wins) > 0 else "$0.00",
+        'avg_loss': f"${losses['profit'].mean():.2f}" if len(losses) > 0 else "$0.00",
+        'largest_win': f"${df['profit'].max():.2f}",
+        'largest_loss': f"${df['profit'].min():.2f}",
+        'net_profit': f"${df['cum_net_profit'].iloc[-1]:.2f}" if 'cum_net_profit' in df.columns and len(df) > 0 else "$0.00",
     }
 
-    # Risk/Reward Ratio
     if len(wins) > 0 and len(losses) > 0:
-        avg_win = wins['Profit'].mean()
-        avg_loss = abs(losses['Profit'].mean())
+        avg_win = wins['profit'].mean()
+        avg_loss = abs(losses['profit'].mean())
         stats['risk_reward'] = f"{avg_win / avg_loss:.2f}" if avg_loss != 0 else "N/A"
     else:
         stats['risk_reward'] = "N/A"
 
-    # Expectancy
     prob_win = len(wins) / len(df) if len(df) > 0 else 0
     prob_loss = len(losses) / len(df) if len(df) > 0 else 0
-    avg_win = wins['Profit'].mean() if len(wins) > 0 else 0
-    avg_loss = losses['Profit'].mean() if len(losses) > 0 else 0
+    avg_win = wins['profit'].mean() if len(wins) > 0 else 0
+    avg_loss = losses['profit'].mean() if len(losses) > 0 else 0
     expectancy = (prob_win * avg_win) + (prob_loss * avg_loss)
     stats['expectancy'] = f"${expectancy:.2f}"
 
@@ -107,39 +154,39 @@ def calculate_stats(df):
 
 def get_strategy_stats(df):
     """Get stats grouped by strategy"""
-    if df.empty or 'Strategy' not in df.columns:
+    if df.empty or 'strategy' not in df.columns:
         return {}
 
     strategies = {}
-    for strategy in df['Strategy'].unique():
-        strat_df = df[df['Strategy'] == strategy]
-        wins = len(strat_df[strat_df['Profit'] > 0])
+    for strategy in df['strategy'].unique():
+        strat_df = df[df['strategy'] == strategy]
+        wins = len(strat_df[strat_df['profit'] > 0])
         total = len(strat_df)
         strategies[strategy] = {
             'trades': total,
             'wins': wins,
             'win_rate': f"{(wins/total*100):.1f}%" if total > 0 else "0%",
-            'profit': f"${strat_df['Profit'].sum():.2f}"
+            'profit': f"${strat_df['profit'].sum():.2f}"
         }
     return strategies
 
 
 def get_account_comparison(df):
     """Compare performance across accounts"""
-    if df.empty or 'Account' not in df.columns:
+    if df.empty or 'account' not in df.columns:
         return {}
 
     accounts = {}
-    for account in df['Account'].unique():
-        acc_df = df[df['Account'] == account]
-        wins = len(acc_df[acc_df['Profit'] > 0])
+    for account in df['account'].unique():
+        acc_df = df[df['account'] == account]
+        wins = len(acc_df[acc_df['profit'] > 0])
         total = len(acc_df)
         accounts[account] = {
             'trades': total,
             'wins': wins,
             'win_rate': f"{(wins/total*100):.1f}%" if total > 0 else "0%",
-            'profit': f"${acc_df['Profit'].sum():.2f}",
-            'net_profit': f"${acc_df['Cum. net profit'].iloc[-1]:.2f}" if 'Cum. net profit' in acc_df.columns and len(acc_df) > 0 else "$0.00"
+            'profit': f"${acc_df['profit'].sum():.2f}",
+            'net_profit': f"${acc_df['cum_net_profit'].iloc[-1]:.2f}" if 'cum_net_profit' in acc_df.columns and len(acc_df) > 0 else "$0.00"
         }
     return accounts
 
@@ -152,10 +199,11 @@ def create_charts(df, account_filter='all'):
     charts = {}
 
     # 1. Cumulative Profit Curve
-    if 'Exit time' in df.columns and 'Cum. net profit' in df.columns:
+    if 'exit_time' in df.columns and 'cum_net_profit' in df.columns:
+        df_sorted = df.sort_values('exit_time')
         plt.figure(figsize=(12, 5))
-        plt.plot(df['Exit time'], df['Cum. net profit'], marker='o',
-                 linestyle='-', linewidth=2, color='#007bff')
+        plt.plot(df_sorted['exit_time'], df_sorted['cum_net_profit'],
+                 marker='o', linestyle='-', linewidth=2, color='#007bff')
         title = 'Cumulative Net Profit Over Time'
         if account_filter != 'all':
             title += f' - {account_filter}'
@@ -170,11 +218,11 @@ def create_charts(df, account_filter='all'):
         charts['profit_curve'] = 'profit_curve.png'
 
     # 2. Win/Loss Distribution
-    if 'Profit' in df.columns:
+    if 'profit' in df.columns:
         plt.figure(figsize=(10, 5))
-        wins = len(df[df['Profit'] > 0])
-        losses = len(df[df['Profit'] < 0])
-        break_even = len(df[df['Profit'] == 0])
+        wins = len(df[df['profit'] > 0])
+        losses = len(df[df['profit'] < 0])
+        break_even = len(df[df['profit'] == 0])
         plt.bar(['Wins', 'Losses', 'Break Even'], [wins, losses, break_even],
                 color=['#38ef7d', '#f45c43', '#999'])
         plt.title('Trade Outcomes', fontsize=14, fontweight='bold')
@@ -184,10 +232,10 @@ def create_charts(df, account_filter='all'):
         plt.close()
         charts['win_loss'] = 'win_loss.png'
 
-    # 3. Profit Distribution (Histogram)
-    if 'Profit' in df.columns:
+    # 3. Profit Distribution
+    if 'profit' in df.columns:
         plt.figure(figsize=(10, 5))
-        plt.hist(df['Profit'], bins=15, color='steelblue', edgecolor='black')
+        plt.hist(df['profit'], bins=15, color='steelblue', edgecolor='black')
         plt.title('Profit Distribution', fontsize=14, fontweight='bold')
         plt.xlabel('Profit ($)')
         plt.ylabel('Frequency')
@@ -199,8 +247,8 @@ def create_charts(df, account_filter='all'):
         charts['profit_dist'] = 'profit_dist.png'
 
     # 4. Strategy Performance
-    if 'Strategy' in df.columns and 'Profit' in df.columns:
-        strategy_prof = df.groupby('Strategy')['Profit'].sum().sort_values()
+    if 'strategy' in df.columns and 'profit' in df.columns:
+        strategy_prof = df.groupby('strategy')['profit'].sum().sort_values()
         plt.figure(figsize=(10, 5))
         colors = ['#38ef7d' if x >
                   0 else '#f45c43' for x in strategy_prof.values]
@@ -213,9 +261,9 @@ def create_charts(df, account_filter='all'):
         plt.close()
         charts['strategy_profit'] = 'strategy_profit.png'
 
-    # 5. Account Comparison (if multiple accounts and viewing all)
-    if account_filter == 'all' and 'Account' in df.columns:
-        account_prof = df.groupby('Account')['Profit'].sum().sort_values()
+    # 5. Account Comparison
+    if account_filter == 'all' and 'account' in df.columns:
+        account_prof = df.groupby('account')['profit'].sum().sort_values()
         if len(account_prof) > 1:
             plt.figure(figsize=(10, 5))
             colors = ['#38ef7d' if x >
@@ -424,11 +472,10 @@ HTML_TEMPLATE = """
 
 @app.route("/", methods=["GET"])
 def index():
-    df = parse_all_csv(UPLOAD_FOLDER)
-    accounts = get_account_list(df)
+    df = get_trades_df()
+    accounts = get_account_list()
     current_account = request.args.get('account', 'all')
 
-    # Filter by account
     filtered_df = filter_by_account(df, current_account)
 
     stats = calculate_stats(filtered_df)
@@ -455,7 +502,13 @@ def upload():
         return redirect("/")
     file = request.files['file']
     if file and file.filename.endswith('.csv'):
-        file.save(os.path.join(UPLOAD_FOLDER, file.filename))
+        # Save temporarily
+        temp_path = f'/tmp/{file.filename}'
+        file.save(temp_path)
+        # Insert into Supabase
+        insert_trades_from_csv(temp_path)
+        # Clean up
+        os.remove(temp_path)
     return redirect("/")
 
 

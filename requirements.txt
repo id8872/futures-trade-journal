@@ -2,3 +2,5 @@ flask
 pandas
 matplotlib
 gunicorn
+supabase
+python-dotenv
