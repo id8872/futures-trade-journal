@@ -1,80 +1,88 @@
+from flask import Flask, render_template_string, request, redirect
 import pandas as pd
-import matplotlib.pyplot as plt
-import glob
 import os
 
+app = Flask(__name__)
 
-def load_and_process_trades(csv_folder):
-    # Load all CSV files from folder
-    all_files = glob.glob(os.path.join(csv_folder, '*.csv'))
+UPLOAD_FOLDER = 'data'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+HTML = """
+<!doctype html>
+<title>Futures Trade Journal</title>
+<h1>Upload NinjaTrader CSV</h1>
+<form method=post enctype=multipart/form-data action="/upload">
+  <input type=file name=file>
+  <input type=submit value=Upload>
+</form>
+{% if summary %}
+  <h2>Trade Summary</h2>
+  <ul>
+    <li>Total trades: {{ summary['total_trades'] }}</li>
+    <li>Winning trades: {{ summary['winning_trades'] }}</li>
+    <li>Losing trades: {{ summary['losing_trades'] }}</li>
+    <li>Total profit: ${{ summary['total_profit'] }}</li>
+    <li>Average profit: ${{ summary['avg_profit'] }}</li>
+    <li>Net profit: ${{ summary['net_profit'] }}</li>
+  </ul>
+{% endif %}
+"""
+
+
+def parse_all_csv(folder):
     df_list = []
+    for f in os.listdir(folder):
+        if f.endswith('.csv'):
+            df = pd.read_csv(os.path.join(folder, f))
+            # Clean numeric columns if present
+            if 'Profit' in df.columns:
+                df['Profit'] = df['Profit'].replace(
+                    {'\\$': '', ',': ''}, regex=True).astype(float)
+            if 'Cum. net profit' in df.columns:
+                df['Cum. net profit'] = df['Cum. net profit'].replace(
+                    {'\\$': '', ',': ''}, regex=True).astype(float)
+            df_list.append(df)
+    if df_list:
+        return pd.concat(df_list, ignore_index=True)
+    else:
+        return pd.DataFrame()
 
-    for file in all_files:
-        df = pd.read_csv(file)
-        df_list.append(df)
 
-    df_all = pd.concat(df_list, ignore_index=True)
-
-    # Clean numeric columns
-    df_all['Profit'] = df_all['Profit'].replace(
-        {'\\$': '', ',': ''}, regex=True).astype(float)
-    df_all['Cum. net profit'] = df_all['Cum. net profit'].replace(
-        {'\\$': '', ',': ''}, regex=True).astype(float)
-    df_all['Exit time'] = pd.to_datetime(df_all['Exit time'])
-
-    return df_all
-
-
-def calculate_summary(df):
+def make_summary(df):
+    if df.empty:
+        return None
     total_trades = len(df)
-    winning_trades = len(df[df['Profit'] > 0])
-    losing_trades = len(df[df['Profit'] <= 0])
+    winning_trades = (df['Profit'] > 0).sum()
+    losing_trades = (df['Profit'] <= 0).sum()
     total_profit = df['Profit'].sum()
     avg_profit = df['Profit'].mean()
-    net_profit = df['Cum. net profit'].iloc[-1] if not df.empty else 0
-
-    summary = {
-        'Total trades': total_trades,
-        'Winning trades': winning_trades,
-        'Losing trades': losing_trades,
-        'Total profit': total_profit,
-        'Average profit': avg_profit,
-        'Net profit': net_profit
-    }
-    return summary
+    net_profit = df['Cum. net profit'].iloc[-1] if 'Cum. net profit' in df else 0
+    return dict(
+        total_trades=total_trades,
+        winning_trades=winning_trades,
+        losing_trades=losing_trades,
+        total_profit=f"{total_profit:.2f}",
+        avg_profit=f"{avg_profit:.2f}",
+        net_profit=f"{net_profit:.2f}"
+    )
 
 
-def plot_cumulative_profit(df):
-    plt.figure(figsize=(10, 6))
-    plt.plot(df['Exit time'], df['Cum. net profit'], marker='o', linestyle='-')
-    plt.title('Cumulative Net Profit Over Time')
-    plt.xlabel('Exit Time')
-    plt.ylabel('Cumulative Net Profit')
-    plt.grid(True)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig('cumulative_net_profit.png')
-    plt.show()
+@app.route("/", methods=["GET"])
+def index():
+    df = parse_all_csv(UPLOAD_FOLDER)
+    summary = make_summary(df)
+    return render_template_string(HTML, summary=summary)
 
 
-def save_summary(summary):
-    summary_df = pd.DataFrame([summary])
-    summary_df.to_csv('trade_summary.csv', index=False)
-
-
-def main():
-    csv_folder = r'D:\futures_xml\journal'  # Use raw string for Windows path
-    trades_df = load_and_process_trades(csv_folder)
-    summary = calculate_summary(trades_df)
-    print("Summary Statistics:")
-    for key, value in summary.items():
-        if isinstance(value, float):
-            print(f"{key}: ${value:.2f}")
-        else:
-            print(f"{key}: {value}")
-    plot_cumulative_profit(trades_df)
-    save_summary(summary)
+@app.route("/upload", methods=["POST"])
+def upload():
+    if 'file' not in request.files:
+        return redirect("/")
+    file = request.files['file']
+    if file and file.filename.endswith('.csv'):
+        file.save(os.path.join(UPLOAD_FOLDER, file.filename))
+    return redirect("/")
 
 
 if __name__ == "__main__":
-    main()
+    app.run(debug=True)
