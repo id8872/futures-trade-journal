@@ -21,12 +21,20 @@ CHART_FOLDER = 'static'
 os.makedirs(CHART_FOLDER, exist_ok=True)
 
 
+def clean_money_value(value):
+    if pd.isna(value):
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    return float(str(value).replace('$', '').replace(',', '').strip())
+
+
 def insert_trades_from_csv(file_path):
     """Parse CSV and insert into Supabase"""
     try:
         df = pd.read_csv(file_path)
 
-        # Clean numeric columns
+        # Clean numeric columns before inserting
         for col in ['Profit', 'Cum. net profit', 'Entry price', 'Exit price', 'Qty', 'MAE', 'MFE']:
             if col in df.columns:
                 df[col] = df[col].replace({'\$': '', ',': ''}, regex=True)
@@ -40,7 +48,6 @@ def insert_trades_from_csv(file_path):
         if 'Entry time' in df.columns:
             df['Entry time'] = pd.to_datetime(df['Entry time'])
 
-        # Insert rows
         for idx, row in df.iterrows():
             trade_data = {
                 'trade_number': int(row.get('Trade number', 0)) if pd.notna(row.get('Trade number')) else None,
@@ -55,11 +62,11 @@ def insert_trades_from_csv(file_path):
                 'exit_time': row.get('Exit time'),
                 'entry_name': str(row.get('Entry name', '')),
                 'exit_name': str(row.get('Exit name', '')),
-                'profit': float(row.get('Profit', 0)) if pd.notna(row.get('Profit')) else 0,
-                'cum_net_profit': float(row.get('Cum. net profit', 0)) if pd.notna(row.get('Cum. net profit')) else 0,
-                'commission': float(row.get('Commission', 0)) if pd.notna(row.get('Commission')) else 0,
-                'mae': float(row.get('MAE', 0)) if pd.notna(row.get('MAE')) else 0,
-                'mfe': float(row.get('MFE', 0)) if pd.notna(row.get('MFE')) else 0,
+                'profit': clean_money_value(row.get('Profit', 0)),
+                'cum_net_profit': clean_money_value(row.get('Cum. net profit', 0)),
+                'commission': clean_money_value(row.get('Commission', 0)),
+                'mae': clean_money_value(row.get('MAE', 0)),
+                'mfe': clean_money_value(row.get('MFE', 0)),
             }
             supabase.table('trades').insert(trade_data).execute()
 
