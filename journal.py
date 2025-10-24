@@ -31,7 +31,6 @@ def clean_money_value(value):
 def insert_trades_from_csv(file_path):
     try:
         df = pd.read_csv(file_path)
-
         for col in ['Profit', 'Cum. net profit', 'Entry price', 'Exit price', 'Qty', 'MAE', 'MFE']:
             if col in df.columns:
                 df[col] = df[col].replace({'\$': '', ',': ''}, regex=True)
@@ -39,12 +38,10 @@ def insert_trades_from_csv(file_path):
                     df[col] = pd.to_numeric(df[col])
                 except:
                     pass
-
         if 'Exit time' in df.columns:
             df['Exit time'] = pd.to_datetime(df['Exit time'])
         if 'Entry time' in df.columns:
             df['Entry time'] = pd.to_datetime(df['Entry time'])
-
         for idx, row in df.iterrows():
             trade_data = {
                 'trade_number': int(row.get('Trade number', 0)) if pd.notna(row.get('Trade number')) else None,
@@ -66,7 +63,6 @@ def insert_trades_from_csv(file_path):
                 'mfe': clean_money_value(row.get('MFE', 0)),
             }
             supabase.table('trades').insert(trade_data).execute()
-
         return True
     except Exception as e:
         print(f"Error inserting trades: {e}")
@@ -78,9 +74,11 @@ def get_trades_df(account='all', start_date=None, end_date=None):
     if account and account != 'all':
         query = query.eq('account', account)
     if start_date:
-        query = query.gte('exit_time', start_date)
+        start_date_iso = f"{start_date}T00:00:00Z"
+        query = query.gte('exit_time', start_date_iso)
     if end_date:
-        query = query.lte('exit_time', end_date)
+        end_date_iso = f"{end_date}T23:59:59Z"
+        query = query.lte('exit_time', end_date_iso)
     response = query.execute()
     if response.data:
         df = pd.DataFrame(response.data)
@@ -258,7 +256,7 @@ HTML_TEMPLATE = """
 <head>
     <title>Futures Trade Journal</title>
     <style>
-        /* Styling omitted for brevity - use previous styling from earlier code */
+        /* Add your previous CSS here */
     </style>
 </head>
 <body>
@@ -293,9 +291,9 @@ HTML_TEMPLATE = """
         </div>
         
         {% if stats %}
-            <!-- Stats, comparisons, and charts as previously structured -->
+            <!-- Existing stats, account comparison and charts HTML -->
         {% else %}
-            <p style="text-align: center; color: #999; margin-top: 40px;">Upload CSV files to see your trading analytics.</p>
+            <p style="text-align: center; color: #999; margin-top: 40px;">No trades found for the selected filters.</p>
         {% endif %}
     </div>
     
@@ -353,13 +351,12 @@ def index():
     df = get_trades_df(account, start_date, end_date)
     accounts = get_account_list()
 
-    filtered_df = filter_by_account(df, account)
-
-    stats = calculate_stats(filtered_df)
-    strategy_stats = get_strategy_stats(filtered_df)
+    # No need to filter in memory again if filtered by database
+    stats = calculate_stats(df)
+    strategy_stats = get_strategy_stats(df)
     account_comparison = get_account_comparison(
         df) if account == 'all' else None
-    charts = create_charts(filtered_df, account)
+    charts = create_charts(df, account)
 
     return render_template_string(
         HTML_TEMPLATE,
