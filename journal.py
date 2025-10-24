@@ -49,7 +49,9 @@ def get_account_list(df):
     """Get list of unique accounts"""
     if df.empty or 'Account' not in df.columns:
         return []
-    return sorted(df['Account'].unique().tolist())
+    # Remove NaN values and convert to string, then get unique values
+    accounts = df['Account'].dropna().astype(str).unique().tolist()
+    return sorted(accounts)
 
 
 def filter_by_account(df, account):
