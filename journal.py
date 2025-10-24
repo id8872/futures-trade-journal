@@ -30,6 +30,49 @@ def clean_money_value(value):
 
 
 def insert_trades_from_csv(file_path):
+    try:
+        df = pd.read_csv(file_path)
+
+        for col in ['Profit', 'Cum. net profit', 'Entry price', 'Exit price', 'Qty', 'MAE', 'MFE']:
+            if col in df.columns:
+                df[col] = df[col].replace({'\$': '', ',': ''}, regex=True)
+                try:
+                    df[col] = pd.to_numeric(df[col])
+                except:
+                    pass
+
+        if 'Exit time' in df.columns:
+            df['Exit time'] = pd.to_datetime(df['Exit time'])
+        if 'Entry time' in df.columns:
+            df['Entry time'] = pd.to_datetime(df['Entry time'])
+
+        for idx, row in df.iterrows():
+            trade_data = {
+                'trade_number': int(row.get('Trade number', 0)) if pd.notna(row.get('Trade number')) else None,
+                'instrument': str(row.get('Instrument', '')),
+                'account': str(row.get('Account', '')),
+                'strategy': str(row.get('Strategy', '')),
+                'market_pos': str(row.get('Market pos.', '')),
+                'qty': int(row.get('Qty', 0)) if pd.notna(row.get('Qty')) else 0,
+                'entry_price': float(row.get('Entry price', 0)) if pd.notna(row.get('Entry price')) else 0,
+                'exit_price': float(row.get('Exit price', 0)) if pd.notna(row.get('Exit price')) else 0,
+                'entry_time': row['Entry time'].isoformat() if pd.notna(row.get('Entry time')) else None,
+                'exit_time': row['Exit time'].isoformat() if pd.notna(row.get('Exit time')) else None,
+                'entry_name': str(row.get('Entry name', '')),
+                'exit_name': str(row.get('Exit name', '')),
+                'profit': clean_money_value(row.get('Profit', 0)),
+                'cum_net_profit': clean_money_value(row.get('Cum. net profit', 0)),
+                'commission': clean_money_value(row.get('Commission', 0)),
+                'mae': clean_money_value(row.get('MAE', 0)),
+                'mfe': clean_money_value(row.get('MFE', 0)),
+            }
+            supabase.table('trades').insert(trade_data).execute()
+
+        return True
+    except Exception as e:
+        print(f"Error inserting trades: {e}")
+        return False
+
     """Parse CSV and insert into Supabase"""
     try:
         df = pd.read_csv(file_path)
