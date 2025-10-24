@@ -70,27 +70,36 @@ def insert_trades_from_csv(file_path):
 
 
 def get_trades_df(account='all', start_date=None, end_date=None):
+    print("About to query Supabase...")
     query = supabase.table('trades').select('*')
+    print("Initial query object created.")
     if account and account != 'all':
+        print(f"Filtering by account: {account}")
         query = query.eq('account', account)
     if start_date:
         start_date_iso = f"{start_date}T00:00:00Z"
+        print(f"Filtering by start_date: {start_date_iso}")
         query = query.gte('exit_time', start_date_iso)
     if end_date:
         end_date_iso = f"{end_date}T23:59:59Z"
+        print(f"Filtering by end_date: {end_date_iso}")
         query = query.lte('exit_time', end_date_iso)
-    response = query.execute()
+    try:
+        response = query.execute()
+        print("Supabase response received.")
+        print("Response data:", response.data)
+    except Exception as e:
+        print("Supabase query error:", e)
+        return pd.DataFrame()
     if response.data:
         df = pd.DataFrame(response.data)
         for col in ['entry_time', 'exit_time']:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col])
-
-        print("Rows returned:", len(df), "| Filters=",
-              account, start_date, end_date)
+        print("Rows returned:", len(df))
         print(df.head())
-
         return df
+    print("No data received from Supabase.")
     return pd.DataFrame()
 
 
