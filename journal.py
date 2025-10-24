@@ -73,35 +73,29 @@ def insert_trades_from_csv(file_path):
         return False
 
 
-def get_trades_df(account='all'):
-    try:
-        if account and account != 'all':
-            response = supabase.table('trades').select(
-                '*').eq('account', account).execute()
-        else:
-            response = supabase.table('trades').select('*').execute()
-
-        if response.data:
-            df = pd.DataFrame(response.data)
-            for col in ['entry_time', 'exit_time']:
-                if col in df.columns:
-                    df[col] = pd.to_datetime(df[col])
-            return df
-        return pd.DataFrame()
-    except Exception as e:
-        print(f"Error fetching trades: {e}")
-        return pd.DataFrame()
+def get_trades_df(account='all', start_date=None, end_date=None):
+    query = supabase.table('trades').select('*')
+    if account and account != 'all':
+        query = query.eq('account', account)
+    if start_date:
+        query = query.gte('exit_time', start_date)
+    if end_date:
+        query = query.lte('exit_time', end_date)
+    response = query.execute()
+    if response.data:
+        df = pd.DataFrame(response.data)
+        for col in ['entry_time', 'exit_time']:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col])
+        return df
+    return pd.DataFrame()
 
 
 def get_account_list():
-    try:
-        response = supabase.table('trades').select('account').execute()
-        accounts = list(set([row['account']
-                        for row in response.data if row.get('account')]))
-        return sorted(accounts)
-    except Exception as e:
-        print(f"Error getting accounts: {e}")
-        return []
+    response = supabase.table('trades').select('account').execute()
+    accounts = list(set([row['account']
+                    for row in response.data if row.get('account')]))
+    return sorted(accounts)
 
 
 def filter_by_account(df, account):
@@ -111,7 +105,151 @@ def filter_by_account(df, account):
         return df[df['account'] == account]
     return df
 
-# ... (the other helper functions for stats and charts remain unchanged, same as before)
+
+def calculate_stats(df):
+    if df.empty or 'profit' not in df.columns:
+        return None
+    wins = df[df['profit'] > 0]
+    losses = df[df['profit'] < 0]
+    stats = {
+        'total_trades': len(df),
+        'winning_trades': len(wins),
+        'losing_trades': len(losses),
+        'break_even': len(df[df['profit'] == 0]),
+        'win_rate': f"{(len(wins) / len(df) * 100):.1f}%" if len(df) > 0 else "0%",
+        'total_profit': f"${df['profit'].sum():.2f}",
+        'avg_profit': f"${df['profit'].mean():.2f}",
+        'avg_win': f"${wins['profit'].mean():.2f}" if len(wins) > 0 else "$0.00",
+        'avg_loss': f"${losses['profit'].mean():.2f}" if len(losses) > 0 else "$0.00",
+        'largest_win': f"${df['profit'].max():.2f}",
+        'largest_loss': f"${df['profit'].min():.2f}",
+        'net_profit': f"${df['cum_net_profit'].iloc[-1]:.2f}" if 'cum_net_profit' in df.columns and len(df) > 0 else "$0.00",
+    }
+    if len(wins) > 0 and len(losses) > 0:
+        avg_win = wins['profit'].mean()
+        avg_loss = abs(losses['profit'].mean())
+        stats['risk_reward'] = f"{avg_win / avg_loss:.2f}" if avg_loss != 0 else "N/A"
+    else:
+        stats['risk_reward'] = "N/A"
+    prob_win = len(wins) / len(df) if len(df) > 0 else 0
+    prob_loss = len(losses) / len(df) if len(df) > 0 else 0
+    avg_win = wins['profit'].mean() if len(wins) > 0 else 0
+    avg_loss = losses['profit'].mean() if len(losses) > 0 else 0
+    expectancy = (prob_win * avg_win) + (prob_loss * avg_loss)
+    stats['expectancy'] = f"${expectancy:.2f}"
+    return stats
+
+
+def get_strategy_stats(df):
+    if df.empty or 'strategy' not in df.columns:
+        return {}
+    strategies = {}
+    for strategy in df['strategy'].unique():
+        strat_df = df[df['strategy'] == strategy]
+        wins = len(strat_df[strat_df['profit'] > 0])
+        total = len(strat_df)
+        strategies[strategy] = {
+            'trades': total,
+            'wins': wins,
+            'win_rate': f"{(wins/total*100):.1f}%" if total > 0 else "0%",
+            'profit': f"${strat_df['profit'].sum():.2f}"
+        }
+    return strategies
+
+
+def get_account_comparison(df):
+    if df.empty or 'account' not in df.columns:
+        return {}
+    accounts = {}
+    for account in df['account'].unique():
+        acc_df = df[df['account'] == account]
+        wins = len(acc_df[acc_df['profit'] > 0])
+        total = len(acc_df)
+        accounts[account] = {
+            'trades': total,
+            'wins': wins,
+            'win_rate': f"{(wins/total*100):.1f}%" if total > 0 else "0%",
+            'profit': f"${acc_df['profit'].sum():.2f}",
+            'net_profit': f"${acc_df['cum_net_profit'].iloc[-1]:.2f}" if 'cum_net_profit' in acc_df.columns and len(acc_df) > 0 else "$0.00"
+        }
+    return accounts
+
+
+def create_charts(df, account_filter='all'):
+    if df.empty:
+        return {}
+    charts = {}
+    if 'exit_time' in df.columns and 'cum_net_profit' in df.columns:
+        df_sorted = df.sort_values('exit_time')
+        plt.figure(figsize=(12, 5))
+        plt.plot(df_sorted['exit_time'], df_sorted['cum_net_profit'],
+                 marker='o', linestyle='-', linewidth=2, color='#007bff')
+        title = 'Cumulative Net Profit Over Time'
+        if account_filter != 'all':
+            title += f' - {account_filter}'
+        plt.title(title, fontsize=14, fontweight='bold')
+        plt.xlabel('Exit Time')
+        plt.ylabel('Cumulative Profit ($)')
+        plt.grid(True, alpha=0.3)
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig(os.path.join(CHART_FOLDER, 'profit_curve.png'), dpi=100)
+        plt.close()
+        charts['profit_curve'] = 'profit_curve.png'
+    if 'profit' in df.columns:
+        plt.figure(figsize=(10, 5))
+        wins = len(df[df['profit'] > 0])
+        losses = len(df[df['profit'] < 0])
+        break_even = len(df[df['profit'] == 0])
+        plt.bar(['Wins', 'Losses', 'Break Even'], [wins, losses,
+                break_even], color=['#38ef7d', '#f45c43', '#999'])
+        plt.title('Trade Outcomes', fontsize=14, fontweight='bold')
+        plt.ylabel('Number of Trades')
+        plt.tight_layout()
+        plt.savefig(os.path.join(CHART_FOLDER, 'win_loss.png'), dpi=100)
+        plt.close()
+        charts['win_loss'] = 'win_loss.png'
+    if 'profit' in df.columns:
+        plt.figure(figsize=(10, 5))
+        plt.hist(df['profit'], bins=15, color='steelblue', edgecolor='black')
+        plt.title('Profit Distribution', fontsize=14, fontweight='bold')
+        plt.xlabel('Profit ($)')
+        plt.ylabel('Frequency')
+        plt.axvline(0, color='red', linestyle='--', linewidth=1, alpha=0.5)
+        plt.grid(True, alpha=0.3, axis='y')
+        plt.tight_layout()
+        plt.savefig(os.path.join(CHART_FOLDER, 'profit_dist.png'), dpi=100)
+        plt.close()
+        charts['profit_dist'] = 'profit_dist.png'
+    if 'strategy' in df.columns and 'profit' in df.columns:
+        strategy_prof = df.groupby('strategy')['profit'].sum().sort_values()
+        plt.figure(figsize=(10, 5))
+        colors = ['#38ef7d' if x >
+                  0 else '#f45c43' for x in strategy_prof.values]
+        strategy_prof.plot(kind='barh', color=colors)
+        plt.title('Profit by Strategy', fontsize=14, fontweight='bold')
+        plt.xlabel('Total Profit ($)')
+        plt.axvline(0, color='black', linewidth=0.8)
+        plt.tight_layout()
+        plt.savefig(os.path.join(CHART_FOLDER, 'strategy_profit.png'), dpi=100)
+        plt.close()
+        charts['strategy_profit'] = 'strategy_profit.png'
+    if account_filter == 'all' and 'account' in df.columns:
+        account_prof = df.groupby('account')['profit'].sum().sort_values()
+        if len(account_prof) > 1:
+            plt.figure(figsize=(10, 5))
+            colors = ['#38ef7d' if x >
+                      0 else '#f45c43' for x in account_prof.values]
+            account_prof.plot(kind='barh', color=colors)
+            plt.title('Profit by Account', fontsize=14, fontweight='bold')
+            plt.xlabel('Total Profit ($)')
+            plt.axvline(0, color='black', linewidth=0.8)
+            plt.tight_layout()
+            plt.savefig(os.path.join(
+                CHART_FOLDER, 'account_profit.png'), dpi=100)
+            plt.close()
+            charts['account_profit'] = 'account_profit.png'
+    return charts
 
 
 HTML_TEMPLATE = """
@@ -120,8 +258,7 @@ HTML_TEMPLATE = """
 <head>
     <title>Futures Trade Journal</title>
     <style>
-        /* Existing styles here */
-        /* Add spinner and upload feedback styles */
+        /* Styling omitted for brevity - use previous styling from earlier code */
     </style>
 </head>
 <body>
@@ -139,20 +276,24 @@ HTML_TEMPLATE = """
             
             {% if accounts %}
                 <div class="account-filter">
-                    <form method="get" action="/">
+                    <form method="get" action="/" id="filter-form">
                         <select name="account" onchange="this.form.submit()">
                             <option value="all" {% if current_account == 'all' %}selected{% endif %}>All Accounts</option>
                             {% for acc in accounts %}
                                 <option value="{{ acc }}" {% if current_account == acc %}selected{% endif %}>{{ acc }}</option>
                             {% endfor %}
                         </select>
+                        <label for="start_date">From: </label>
+                        <input type="date" name="start_date" value="{{ start_date|default('') }}" onchange="this.form.submit()">
+                        <label for="end_date">To: </label>
+                        <input type="date" name="end_date" value="{{ end_date|default('') }}" onchange="this.form.submit()">
                     </form>
                 </div>
             {% endif %}
         </div>
         
         {% if stats %}
-            <!-- Existing stats, comparisons, and charts HTML here -->
+            <!-- Stats, comparisons, and charts as previously structured -->
         {% else %}
             <p style="text-align: center; color: #999; margin-top: 40px;">Upload CSV files to see your trading analytics.</p>
         {% endif %}
@@ -206,7 +347,10 @@ HTML_TEMPLATE = """
 @app.route("/", methods=["GET"])
 def index():
     account = request.args.get('account', 'all')
-    df = get_trades_df(account)
+    start_date = request.args.get('start_date', None)
+    end_date = request.args.get('end_date', None)
+
+    df = get_trades_df(account, start_date, end_date)
     accounts = get_account_list()
 
     filtered_df = filter_by_account(df, account)
@@ -225,6 +369,8 @@ def index():
         charts=charts,
         accounts=accounts,
         current_account=account,
+        start_date=start_date,
+        end_date=end_date,
         timestamp=datetime.now().timestamp()
     )
 
