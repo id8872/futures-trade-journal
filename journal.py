@@ -85,6 +85,11 @@ def get_trades_df(account='all', start_date=None, end_date=None):
         for col in ['entry_time', 'exit_time']:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col])
+
+        print("Rows returned:", len(df), "| Filters=",
+              account, start_date, end_date)
+        print(df.head())
+
         return df
     return pd.DataFrame()
 
