@@ -7,7 +7,8 @@ from supabase import create_client, Client
 import pandas as pd
 import matplotlib
 import json
-from openai import OpenAI
+import requests
+from perplexity_ai import Perplexity
 
 matplotlib.use('Agg')
 
@@ -20,12 +21,6 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# Initialize Perplexity client
-perplexity_client = OpenAI(
-    api_key=PERPLEXITY_API_KEY,
-    base_url="https://api.perplexity.ai"
-)
 
 CHART_FOLDER = 'static'
 os.makedirs(CHART_FOLDER, exist_ok=True)
@@ -576,12 +571,10 @@ ANALYSIS_TEMPLATE = """
     </div>
     
     <script>
-    // Select all checkbox
     document.getElementById('select-all').addEventListener('change', function() {
         document.querySelectorAll('.trade-checkbox').forEach(cb => cb.checked = this.checked);
     });
 
-    // Analyze button
     document.getElementById('analyze-btn').addEventListener('click', async () => {
         const selected = Array.from(document.querySelectorAll('.trade-checkbox:checked'))
             .map(cb => cb.value);
@@ -610,7 +603,6 @@ ANALYSIS_TEMPLATE = """
             const result = await response.json();
             
             if (result.success) {
-                // Use textContent to safely insert text, then manually replace newlines
                 const analysisDiv = document.createElement('div');
                 analysisDiv.className = 'analysis-box';
                 analysisDiv.textContent = result.analysis;
@@ -729,17 +721,23 @@ Trades to analyze:
 Provide actionable feedback for improvement. Be specific and practical."""
 
     try:
-        response = perplexity_client.chat.completions.create(
+        print("Connecting to Perplexity AI...")
+        client = Perplexity(api_key=PERPLEXITY_API_KEY)
+        response = client.chat(
             model="llama-3-sonar-large-32k-online",
             messages=[
                 {"role": "system", "content": "You are an expert futures trading analyst with deep knowledge of price action, risk management, and execution optimization."},
                 {"role": "user", "content": analysis_prompt}
             ]
         )
-        analysis = response.choices[0].message.content
-        return jsonify({"success": True, "analysis": analysis})
+
+        print("Analysis successful!")
+        return jsonify({"success": True, "analysis": response})
+
     except Exception as e:
-        print(f"Perplexity API error: {e}")
+        print(f"Perplexity AI error: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 
