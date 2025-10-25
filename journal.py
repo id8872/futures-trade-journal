@@ -724,7 +724,7 @@ Provide actionable feedback for improvement. Be specific and practical."""
         response = requests.post(
             'https://api.perplexity.ai/chat/completions',
             headers={
-                'Authorization': f'Bearer {PERPLEXITY_API_KEY.strip()}',
+                'Authorization': f'Bearer {PERPLEXITY_API_KEY}',
                 'Content-Type': 'application/json'
             },
             json={
