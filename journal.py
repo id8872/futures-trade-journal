@@ -101,9 +101,19 @@ def get_trades_df(account='all', start_date=None, end_date=None):
     try:
         response = query.execute()
         print("Supabase response received.")
+
+        # Check for Supabase-specific errors in response
+        if hasattr(response, 'error') and response.error:
+            print(f"Supabase API error: {response.error}")
+            return pd.DataFrame()
+
         print(f"Number of rows: {len(response.data) if response.data else 0}")
+
     except Exception as e:
-        print("Supabase query error:", e)
+        print(
+            f"Exception executing Supabase query: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame()
 
     if response.data:
