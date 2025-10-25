@@ -17,16 +17,18 @@ An AI-powered trading journal web application that tracks, analyzes, and provide
 - **Trade Selection**: Multi-select trades for batch analysis
 - **AI-Powered Feedback**: Get expert analysis on entry/exit quality, risk management, and execution using Perplexity AI
 - **Actionable Insights**: Specific feedback on how to improve your trading execution
+- **Debug Mode**: Toggle debug logging with `Ctrl+Shift+D` to troubleshoot issues
 
 ## Tech Stack
 
 - **Frontend**: HTML5, CSS3, JavaScript (Vanilla)
 - **Backend**: Python Flask
 - **Database**: Supabase (PostgreSQL)
-- **AI**: Perplexity AI API
+- **AI**: Perplexity AI API (sonar-pro model)
 - **Charting**: Matplotlib
 - **Hosting**: Render
 - **Data Processing**: Pandas
+- **HTTP Client**: Requests
 
 ## Project Structure
 
@@ -36,15 +38,15 @@ futures-trade-journal/
 ├── requirements.txt                    # Python dependencies
 ├── .env                               # Environment variables (local only)
 ├── .gitignore                         # Git ignore configuration
+├── README.md                          # Documentation
 ├── static/                            # Generated charts and assets
 │   ├── profit_curve.png
 │   ├── win_loss.png
 │   ├── profit_dist.png
 │   ├── strategy_profit.png
 │   └── account_profit.png
-├── data/                              # Local CSV data (ignored)
-│   └── *.csv
-└── README.md                          # This file
+└── data/                              # Local CSV data (ignored)
+    └── *.csv
 ```
 
 ## Installation
@@ -113,7 +115,8 @@ futures-trade-journal/
 
 4. **Configure Build & Start**
    - Build Command: `pip install -r requirements.txt`
-   - Start Command: `gunicorn journal:app`
+   - Start Command: `gunicorn journal:app --timeout 120 --workers 2`
+   - **Important**: The `--timeout 120` allows AI analysis requests to complete without timing out
 
 5. **Deploy**
    - Click "Create Web Service"
@@ -153,6 +156,27 @@ futures-trade-journal/
    - Wait for Perplexity AI to analyze your trades
    - Review feedback on entry/exit quality, risk management, and execution ratings
 
+### Debug Mode
+
+Toggle debug mode to see detailed console logging:
+
+1. **Enable/Disable Debug Mode**
+   - Press `Ctrl+Shift+D` (Windows/Linux) or `Cmd+Shift+D` (Mac)
+   - An alert will show: "Debug Mode: ON ✅" or "Debug Mode: OFF ❌"
+   - Debug mode persists across page reloads
+
+2. **View Debug Logs**
+   - Open browser Developer Tools: `F12`
+   - Go to Console tab
+   - Look for messages prefixed with `[ANALYSIS DEBUG]` or `[ANALYSIS ERROR]`
+   - When debug is OFF, console remains clean
+
+3. **What Gets Logged**
+   - Button clicks and trade selections
+   - API requests and responses
+   - Analysis success/failure
+   - Detailed error messages for troubleshooting
+
 ## CSV Format (NinjaTrader)
 
 Expected CSV columns from NinjaTrader export:
@@ -186,24 +210,47 @@ Entry time, Exit time, Entry name, Exit name, Profit, Cum. net profit, Commissio
 |----------|-------------|---------|
 | `SUPABASE_URL` | Your Supabase project URL | `https://xxxx.supabase.co` |
 | `SUPABASE_KEY` | Your Supabase anon key | `eyJhbGc...` |
-| `PERPLEXITY_API_KEY` | Your Perplexity API key | `pplx-xxxx` |
+| `PERPLEXITY_API_KEY` | Your Perplexity AI API key | `pplx-xxxx` |
 
 ## Troubleshooting
 
 ### "Connection error" when analyzing trades
 - Verify `PERPLEXITY_API_KEY` is set correctly on Render
 - Check Render logs for detailed error messages
-- Ensure your Perplexity account is active and has API credits
+- Enable debug mode (`Ctrl+Shift+D`) to see detailed error information
+- Ensure Render start command includes `--timeout 120`
+
+### Analysis takes too long
+- This is normal - AI analysis can take 15-30 seconds depending on trade complexity
+- Make sure Render has `--timeout 120` configured in start command
+- Reduce number of trades selected if responses are too slow
 
 ### No trades showing on dashboard
 - Make sure CSV file is formatted correctly
 - Check that file contains required columns
 - Verify trades have exit times within your date filter range
+- Try uploading additional trades if dataset is too small
 
 ### Charts not displaying
 - Ensure trade data has required columns (entry_time, exit_time, profit, cum_net_profit)
 - Check Render logs for matplotlib errors
 - Try uploading additional trades if dataset is too small
+
+### Debug mode not working
+- Make sure JavaScript is enabled in browser
+- Clear browser cache and try again
+- Open Developer Console (F12) to verify debug messages appear
+
+## Performance Tips
+
+- **Limit Analysis**: Select fewer trades (5-10 at a time) for faster AI analysis
+- **Date Filtering**: Use date ranges to reduce data queries
+- **Account Filtering**: Filter by single account to focus analysis
+- **Caching**: Charts are cached with timestamps to prevent stale data
+
+## Keyboard Shortcuts
+
+- `Ctrl+Shift+D` or `Cmd+Shift+D` - Toggle debug mode on/off
 
 ## Future Enhancements
 
@@ -217,6 +264,8 @@ Entry time, Exit time, Entry name, Exit name, Profit, Cum. net profit, Commissio
 - [ ] Real-time trade syncing
 - [ ] Multiple file upload support
 - [ ] Export analysis results as PDF
+- [ ] Trade notes and annotations
+- [ ] Performance alerts and notifications
 
 ## Contributing
 
@@ -235,51 +284,21 @@ This project is licensed under the MIT License - see LICENSE file for details.
 
 For issues, questions, or feature requests:
 - Open an issue on GitHub
-- Contact the developer
+- Enable debug mode (`Ctrl+Shift+D`) and check console logs
+- Review troubleshooting section above
 
 ## Acknowledgments
 
-- Perplexity AI for trade analysis
+- Perplexity AI for trade analysis with sonar-pro model
 - Supabase for database hosting
 - Render for application hosting
 - NinjaTrader for trade data export format
+- Flask and Pandas community
 
 ---
 
 **Last Updated**: October 25, 2025  
-**Version**: 1.0.0  
-**Status**: Active Development
-
-
-ToDo
-
-1. **Verify Data Upload and Display**
-   - Confirm that uploaded CSV rows are properly inserted into Supabase
-   - Confirm the dashboard metrics update accordingly on upload
-   - Fix any remaining parsing or display issues from test uploads
-
-2. **Polish User Interface**
-   - Enhance form UI/UX to show upload success or errors clearly
-   - Add pagination or search/filter for large numbers of trades
-   - Add export/download buttons for reports or charts
-
-3. **Add User Authentication**
-   - Use Supabase auth to allow multiple users
-   - Secure trade data to each user account
-   - Add login/register pages
-
-4. **Expand Analytics**
-   - Add new chart types like monthly P&L, instrument-wise stats, HOD/LOL analysis
-   - Implement strategy comparison over time
-   - Add trade journal notes and tagging features
-
-5. **Improve Performance & Scalability**
-   - Cache frequent queries
-   - Optimize database indexes and fetches
-
-6. **Automate CSV Uploads**
-   - Consider automating CSV extract from NinjaTrader via APIs or scheduled upload scripts
-
-7. **Backup & Data Export**
-   - Add options to backup Supabase data or export all trades to CSV/Excel for offline use
-
+**Version**: 1.1.0  
+**Status**: Production Ready  
+**Model**: Perplexity sonar-pro  
+**Timeout**: 120 seconds for API requests
