@@ -359,9 +359,9 @@ HTML_TEMPLATE = """
                             {% endfor %}
                         </select>
                         <label for="start_date">From:</label>
-                        <input type="date" name="start_date" value="{% if start_date %}{{ start_date }}{% endif %}" onchange="this.form.submit()">
+                        <input type="date" name="start_date" value="{{ start_date|default('') }}" onchange="this.form.submit()">
                         <label for="end_date">To:</label>
-                        <input type="date" name="end_date" value="{% if end_date %}{{ end_date }}{% endif %}" onchange="this.form.submit()">
+                        <input type="date" name="end_date" value="{{ end_date|default('') }}" onchange="this.form.submit()">
                     </form>
                 </div>
             {% endif %}
@@ -479,7 +479,7 @@ ANALYSIS_TEMPLATE = """
         .nav a:hover { background: #0056b3; }
         .quick-filters { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
         .btn-quick { padding: 8px 16px; background: #f0f0f0; border: 1px solid #ddd; border-radius: 4px; text-decoration: none; color: #333; font-size: 0.9rem; }
-        .controls { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+        .controls { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; }
         .controls select, .controls input { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; }
         table { width: 100%; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
         table th, table td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
@@ -489,8 +489,6 @@ ANALYSIS_TEMPLATE = """
         #analyze-btn { padding: 12px 24px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: 500; }
         #analyze-btn:hover { background: #0056b3; }
         #analyze-btn:disabled { background: #ccc; cursor: not-allowed; }
-        #debug-btn { padding: 12px 24px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: 500; margin-left: 10px; }
-        #debug-btn:hover { opacity: 0.9; }
         #analysis-results { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-top: 20px; display: none; }
         .analysis-box { line-height: 1.6; white-space: pre-wrap; }
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid #007bff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; display: none; }
@@ -523,12 +521,11 @@ ANALYSIS_TEMPLATE = """
                 </select>
                 {% endif %}
                 <label>From:</label>
-                <input type="date" name="start_date" value="{% if start_date %}{{ start_date }}{% endif %}" onchange="this.form.submit()">
+                <input type="date" name="start_date" value="{{ start_date|default('') }}" onchange="this.form.submit()">
                 <label>To:</label>
-                <input type="date" name="end_date" value="{% if end_date %}{{ end_date }}{% endif %}" onchange="this.form.submit()">
+                <input type="date" name="end_date" value="{{ end_date|default('') }}" onchange="this.form.submit()">
             </form>
             <button id="analyze-btn">Analyze Selected Trades</button>
-            <button id="debug-btn">🐛 Debug</button>
         </div>
         
         {% if trades %}
@@ -588,20 +585,14 @@ ANALYSIS_TEMPLATE = """
         }
     }
 
-    // Debug button functionality
-    document.getElementById('debug-btn').addEventListener('click', function() {
-        const newDebugState = localStorage.getItem('debug-mode') !== 'true';
-        localStorage.setItem('debug-mode', newDebugState);
-        console.log('DEBUG MODE TOGGLED:', newDebugState ? 'ON' : 'OFF');
-        alert('Debug Mode: ' + (newDebugState ? 'ON ✅' : 'OFF ❌'));
-        this.style.background = newDebugState ? '#28a745' : '#6c757d';
-    });
-
-    // Update button color on page load
-    window.addEventListener('load', function() {
-        const debugBtn = document.getElementById('debug-btn');
-        const isDebugOn = localStorage.getItem('debug-mode') === 'true';
-        debugBtn.style.background = isDebugOn ? '#28a745' : '#6c757d';
+    // Toggle debug mode with keyboard shortcut: Ctrl+Shift+D
+    document.addEventListener('keydown', function(event) {
+        if (event.ctrlKey && event.shiftKey && event.key === 'D') {
+            const newDebugState = !DEBUG;
+            localStorage.setItem('debug-mode', newDebugState);
+            console.log('DEBUG MODE TOGGLED:', newDebugState ? 'ON' : 'OFF');
+            alert('Debug Mode: ' + (newDebugState ? 'ON ✅' : 'OFF ❌'));
+        }
     });
 
     document.getElementById('select-all').addEventListener('change', function() {
@@ -657,7 +648,7 @@ ANALYSIS_TEMPLATE = """
                 
                 // Create results HTML
                 let html = '<h2>AI Analysis Results</h2>';
-                html += '<div class="analysis-box">' + result.analysis.split('\n').join('<br>') + '</div>';
+                html += '<div class="analysis-box">' + result.analysis.replace(/\n/g, '<br>') + '</div>';
                 
                 results.innerHTML = html;
                 results.style.display = 'block';
