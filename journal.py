@@ -576,10 +576,12 @@ ANALYSIS_TEMPLATE = """
     </div>
     
     <script>
+    // Select all checkbox
     document.getElementById('select-all').addEventListener('change', function() {
         document.querySelectorAll('.trade-checkbox').forEach(cb => cb.checked = this.checked);
     });
-    
+
+    // Analyze button
     document.getElementById('analyze-btn').addEventListener('click', async () => {
         const selected = Array.from(document.querySelectorAll('.trade-checkbox:checked'))
             .map(cb => cb.value);
@@ -608,14 +610,20 @@ ANALYSIS_TEMPLATE = """
             const result = await response.json();
             
             if (result.success) {
-                results.innerHTML = '<h2>AI Analysis Results</h2><div class="analysis-box">' + 
-                    result.analysis.replace(/\n/g, '<br>') + '</div>';
+                // Use textContent to safely insert text, then manually replace newlines
+                const analysisDiv = document.createElement('div');
+                analysisDiv.className = 'analysis-box';
+                analysisDiv.textContent = result.analysis;
+                
+                results.innerHTML = '<h2>AI Analysis Results</h2>';
+                results.appendChild(analysisDiv);
                 results.style.display = 'block';
             } else {
                 alert('Analysis failed: ' + result.error);
             }
         } catch (error) {
             alert('Error: ' + error.message);
+            console.error('Analysis error:', error);
         } finally {
             btn.disabled = false;
             btn.textContent = 'Analyze Selected Trades';
