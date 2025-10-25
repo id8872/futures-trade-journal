@@ -568,82 +568,106 @@ ANALYSIS_TEMPLATE = """
         <div class="loader" id="loader"></div>
         <div id="analysis-results"></div>
     </div>
-
+    
     <script>
+    // Debug mode - set to true/false to enable/disable logging
+    const DEBUG = localStorage.getItem('debug-mode') === 'true';
+
+    function debugLog(...args) {
+        if (DEBUG) {
+            console.log('[ANALYSIS DEBUG]', ...args);
+        }
+    }
+
+    function debugError(...args) {
+        if (DEBUG) {
+            console.error('[ANALYSIS ERROR]', ...args);
+        }
+    }
+
+    // Toggle debug mode with keyboard shortcut: Ctrl+Shift+D
+    document.addEventListener('keydown', function(event) {
+        if (event.ctrlKey && event.shiftKey && event.key === 'D') {
+            const newDebugState = !DEBUG;
+            localStorage.setItem('debug-mode', newDebugState);
+            console.log('DEBUG MODE TOGGLED:', newDebugState ? 'ON' : 'OFF');
+            alert('Debug Mode: ' + (newDebugState ? 'ON ✅' : 'OFF ❌'));
+        }
+    });
+
     document.getElementById('select-all').addEventListener('change', function() {
-    document.querySelectorAll('.trade-checkbox').forEach(cb => cb.checked = this.checked);
+        document.querySelectorAll('.trade-checkbox').forEach(cb => cb.checked = this.checked);
     });
 
     document.getElementById('analyze-btn').addEventListener('click', async () => {
-    console.log('Analyze button clicked');
-    
-    const selected = Array.from(document.querySelectorAll('.trade-checkbox:checked'))
-        .map(cb => cb.value);
-    
-    console.log('Selected trades:', selected);
-    
-    if (selected.length === 0) {
-        alert('Please select at least one trade to analyze');
-        return;
-    }
-    
-    const btn = document.getElementById('analyze-btn');
-    const loader = document.getElementById('loader');
-    const results = document.getElementById('analysis-results');
-    
-    btn.disabled = true;
-    btn.textContent = 'Analyzing...';
-    loader.style.display = 'block';
-    results.style.display = 'none';
-    results.innerHTML = '';
-    
-    try {
-        console.log('Sending request to /analyze...');
+        debugLog('Analyze button clicked');
         
-        const response = await fetch('/analyze', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({trade_ids: selected})
-        });
+        const selected = Array.from(document.querySelectorAll('.trade-checkbox:checked'))
+            .map(cb => cb.value);
         
-        console.log('Response status:', response.status);
-        console.log('Response headers:', response.headers.get('content-type'));
+        debugLog('Selected trades:', selected);
         
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Error response:', errorText);
-            throw new Error(`HTTP Error ${response.status}`);
+        if (selected.length === 0) {
+            alert('Please select at least one trade to analyze');
+            return;
         }
         
-        const result = await response.json();
-        console.log('Analysis result:', result);
+        const btn = document.getElementById('analyze-btn');
+        const loader = document.getElementById('loader');
+        const results = document.getElementById('analysis-results');
         
-        if (result.success) {
-            console.log('Success! Displaying results...');
+        btn.disabled = true;
+        btn.textContent = 'Analyzing...';
+        loader.style.display = 'block';
+        results.style.display = 'none';
+        results.innerHTML = '';
+        
+        try {
+            debugLog('Sending request to /analyze...');
             
-            // Create results HTML
-            let html = '<h2>AI Analysis Results</h2>';
-            html += '<div class="analysis-box">' + result.analysis.replace(/\n/g, '<br>') + '</div>';
+            const response = await fetch('/analyze', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({trade_ids: selected})
+            });
             
-            results.innerHTML = html;
-            results.style.display = 'block';
+            debugLog('Response status:', response.status);
+            debugLog('Response headers:', response.headers.get('content-type'));
             
-            console.log('Results displayed successfully');
-        } else {
-            console.error('Analysis failed:', result.error);
-            alert('Analysis failed: ' + (result.error || 'Unknown error'));
+            if (!response.ok) {
+                const errorText = await response.text();
+                debugError('Error response:', errorText);
+                throw new Error(`HTTP Error ${response.status}`);
+            }
+            
+            const result = await response.json();
+            debugLog('Analysis result:', result);
+            
+            if (result.success) {
+                debugLog('Success! Displaying results...');
+                
+                // Create results HTML
+                let html = '<h2>AI Analysis Results</h2>';
+                html += '<div class="analysis-box">' + result.analysis.replace(/\n/g, '<br>') + '</div>';
+                
+                results.innerHTML = html;
+                results.style.display = 'block';
+                
+                debugLog('Results displayed successfully');
+            } else {
+                debugError('Analysis failed:', result.error);
+                alert('Analysis failed: ' + (result.error || 'Unknown error'));
+            }
+        } catch (error) {
+            debugError('Error:', error);
+            alert('Error: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Analyze Selected Trades';
+            loader.style.display = 'none';
         }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Error: ' + error.message);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Analyze Selected Trades';
-        loader.style.display = 'none';
-    }
-});
-</script>
-
+    });
+    </script>
 </body>
 </html>
 """
@@ -756,7 +780,7 @@ Provide actionable feedback for improvement. Be specific and practical."""
                     {"role": "user", "content": analysis_prompt}
                 ]
             },
-            timeout=60
+            timeout=120
         )
 
         print(f"Perplexity response status: {response.status_code}")
