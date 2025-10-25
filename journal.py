@@ -724,11 +724,11 @@ Provide actionable feedback for improvement. Be specific and practical."""
         response = requests.post(
             'https://api.perplexity.ai/chat/completions',
             headers={
-                'Authorization': f'Bearer {PERPLEXITY_API_KEY}',
+                'Authorization': f'Bearer {PERPLEXITY_API_KEY.strip()}',
                 'Content-Type': 'application/json'
             },
             json={
-                'model': 'llama-3-sonar-large-32k-online',
+                'model': 'llama-3-sonar-small-32k-online',
                 'messages': [
                     {"role": "system", "content": "You are an expert futures trading analyst with deep knowledge of price action, risk management, and execution optimization."},
                     {"role": "user", "content": analysis_prompt}
