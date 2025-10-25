@@ -8,7 +8,6 @@ import pandas as pd
 import matplotlib
 import json
 import requests
-from perplexity_ai import Perplexity
 
 matplotlib.use('Agg')
 
@@ -721,21 +720,37 @@ Trades to analyze:
 Provide actionable feedback for improvement. Be specific and practical."""
 
     try:
-        print("Connecting to Perplexity AI...")
-        client = Perplexity(api_key=PERPLEXITY_API_KEY)
-        response = client.chat(
-            model="llama-3-sonar-large-32k-online",
-            messages=[
-                {"role": "system", "content": "You are an expert futures trading analyst with deep knowledge of price action, risk management, and execution optimization."},
-                {"role": "user", "content": analysis_prompt}
-            ]
+        print("Connecting to Perplexity API...")
+        response = requests.post(
+            'https://api.perplexity.ai/chat/completions',
+            headers={
+                'Authorization': f'Bearer {PERPLEXITY_API_KEY}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'llama-3-sonar-large-32k-online',
+                'messages': [
+                    {"role": "system", "content": "You are an expert futures trading analyst with deep knowledge of price action, risk management, and execution optimization."},
+                    {"role": "user", "content": analysis_prompt}
+                ]
+            },
+            timeout=60
         )
 
-        print("Analysis successful!")
-        return jsonify({"success": True, "analysis": response})
+        print(f"Perplexity response status: {response.status_code}")
+
+        if response.status_code == 200:
+            result = response.json()
+            analysis = result['choices'][0]['message']['content']
+            print("Analysis successful!")
+            return jsonify({"success": True, "analysis": analysis})
+        else:
+            error_msg = f"API returned {response.status_code}: {response.text}"
+            print(f"Perplexity API error: {error_msg}")
+            return jsonify({"success": False, "error": error_msg}), 500
 
     except Exception as e:
-        print(f"Perplexity AI error: {type(e).__name__}: {str(e)}")
+        print(f"Perplexity API error: {type(e).__name__}: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500

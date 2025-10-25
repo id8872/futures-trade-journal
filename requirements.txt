@@ -4,4 +4,4 @@ pandas
 matplotlib
 supabase
 python-dotenv
-perplexity-ai
+requests
