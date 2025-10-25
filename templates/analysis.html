@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trade Analysis</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        .controls-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .debug-toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tone-select-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #analysis-tone {
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            background-color: white;
+        }
+
+        th,
+        td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        #analysis-result {
+            background-color: white;
+            border: 1px solid #ddd;
+            padding: 20px;
+            min-height: 100px;
+        }
+
+        /* --- Toggle Switch CSS --- */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+        }
+
+        input:checked+.slider {
+            background-color: #2196F3;
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(20px);
+        }
+
+        .slider.round {
+            border-radius: 24px;
+        }
+
+        .slider.round:before {
+            border-radius: 50%;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Trade Analysis</h1>
+    <p><a href="{{ url_for('index') }}">Back to Dashboard</a></p>
+
+    {% if error %}
+    <p style="color: red;"><strong>Error:</strong> {{ error }}</p>
+    {% endif %}
+
+    <div class="controls-container">
+
+        <div class="debug-toggle-container">
+            <label for="debug-toggle" style="font-weight: bold;">Debug Mode:</label>
+            <label class="switch">
+                <input type="checkbox" id="debug-toggle">
+                <span class="slider round"></span>
+            </label>
+        </div>
+
+        <div class="tone-select-container">
+            <label for="analysis-tone" style="font-weight: bold;">Analysis Tone:</label>
+            <select id="analysis-tone">
+                <option value="default" selected>Default</option>
+                <option value="Soros">Soros</option>
+                <option value="Tudor Jones">Tudor Jones</option>
+                <option value="Dennis">Dennis</option>
+                <option value="Groucho">Groucho</option>
+            </select>
+        </div>
+
+        <button id="analyze-button">Analyze Selected Trades</button>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th><input type="checkbox" id="select-all"></th>
+                <th>Instrument</th>
+                <th>Strategy</th>
+                <th>Entry Time</th>
+                <th>Exit Time</th>
+                <th>Profit</th>
+                <th>MAE</th>
+                <th>MFE</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for trade in trades %}
+            <tr>
+                <td><input type="checkbox" class="trade-checkbox" data-trade-id="{{ trade.id }}"></td>
+                <td>{{ trade.instrument }}</td>
+                <td>{{ trade.strategy }}</td>
+                <td>{{ trade.entry_time }}</td>
+                <td>{{ trade.exit_time }}</td>
+                <td>{{ trade.profit }}</td>
+                <td>{{ trade.mae }}</td>
+                <td>{{ trade.mfe }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="8">No trades found.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>AI Analysis</h2>
+    <div id="analysis-result">
+        <p>Select trades and click "Analyze" to get AI feedback.</p>
+    </div>
+
+
+    <script>
+        // --- Global Debug State ---
+        let isDebugMode = false;
+
+        function logDebug(message) {
+            if (isDebugMode) {
+                console.log("[ANALYSIS DEBUG]", message);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+
+            // --- 1. Debug Toggle Logic ---
+            const debugToggle = document.getElementById('debug-toggle');
+
+            // Check local storage and set the toggle
+            if (localStorage.getItem('analysisDebug') === 'true') {
+                debugToggle.checked = true;
+                isDebugMode = true;
+                logDebug("Debug Mode: ON ✅ (loaded from storage)");
+            }
+
+            // Add listener to the toggle
+            debugToggle.addEventListener('change', function () {
+                if (this.checked) {
+                    localStorage.setItem('analysisDebug', 'true');
+                    isDebugMode = true;
+                    alert("Debug Mode: ON ✅");
+                    logDebug("Debug Mode: ON ✅");
+                } else {
+                    localStorage.setItem('analysisDebug', 'false');
+                    isDebugMode = false;
+                    alert("Debug Mode: OFF ❌");
+                }
+            });
+
+            // --- 2. Select-All Checkbox Logic ---
+            const selectAllCheckbox = document.getElementById('select-all');
+            const tradeCheckboxes = document.querySelectorAll('.trade-checkbox');
+
+            selectAllCheckbox.addEventListener('change', function () {
+                tradeCheckboxes.forEach(checkbox => {
+                    checkbox.checked = this.checked;
+                });
+            });
+
+            // --- 3. Analysis Button Logic (MODIFIED) ---
+            const analyzeButton = document.getElementById('analyze-button');
+
+            analyzeButton.addEventListener('click', async function () {
+                logDebug("Analyze button clicked.");
+
+                // Find all checked trade checkboxes
+                const selectedTrades = Array.from(document.querySelectorAll('.trade-checkbox:checked')).map(cb => {
+                    const row = cb.closest('tr');
+                    return {
+                        id: cb.dataset.tradeId,
+                        instrument: row.cells[1].innerText,
+                        strategy: row.cells[2].innerText,
+                        entry_time: row.cells[3].innerText,
+                        exit_time: row.cells[4].innerText,
+                        profit: row.cells[5].innerText,
+                        mae: row.cells[6].innerText,
+                        mfe: row.cells[7].innerText
+                    };
+                });
+
+                logDebug(`Found ${selectedTrades.length} selected trades.`);
+
+                // --- NEW ---
+                // Get the selected tone from the dropdown
+                const selectedTone = document.getElementById('analysis-tone').value;
+                logDebug(`Selected tone: ${selectedTone}`);
+                // --- END NEW ---
+
+                if (selectedTrades.length === 0) {
+                    alert('Please select at least one trade to analyze.');
+                    return;
+                }
+
+                const analysisResultDiv = document.getElementById('analysis-result');
+                analysisResultDiv.innerHTML = '<p>Analyzing trades... This may take 15-30 seconds.</p>';
+
+                try {
+                    logDebug("Sending request to /analyze endpoint...");
+                    const response = await fetch('/analyze', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            trades: selectedTrades,
+                            tone: selectedTone // <-- We are now sending the tone
+                        }),
+                    });
+
+                    logDebug(`Received response with status: ${response.status}`);
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        logDebug(`Error response data: ${JSON.stringify(errorData)}`);
+                        throw new Error(`HTTP error! Status: ${response.status} - ${errorData.error || 'Unknown error'}`);
+                    }
+
+                    const result = await response.json();
+                    logDebug("Successfully parsed JSON response.");
+
+                    // The AI response is expected to be HTML
+                    analysisResultDiv.innerHTML = result.analysis;
+
+                } catch (error) {
+                    console.error('Error during trade analysis:', error);
+                    logDebug(`Error caught in analysis: ${error.message}`);
+                    analysisResultDiv.innerHTML = `<p style="color: red;"><strong>Error analyzing trades:</strong> ${error.message}</p>`;
+                }
+            });
+        });
+    </script>
+
+</body>
+
+</html>
