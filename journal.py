@@ -728,7 +728,7 @@ Provide actionable feedback for improvement. Be specific and practical."""
                 'Content-Type': 'application/json'
             },
             json={
-                'model': 'llama-3-sonar-small-32k-online',
+                'model': 'sonar-pro',
                 'messages': [
                     {"role": "system", "content": "You are an expert futures trading analyst with deep knowledge of price action, risk management, and execution optimization."},
                     {"role": "user", "content": analysis_prompt}
