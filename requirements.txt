@@ -4,3 +4,4 @@ matplotlib
 gunicorn
 supabase
 python-dotenv
+openai

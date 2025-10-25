@@ -6,6 +6,9 @@ from flask import Flask, render_template_string, request, jsonify
 from supabase import create_client, Client
 import pandas as pd
 import matplotlib
+import json
+from openai import OpenAI
+
 matplotlib.use('Agg')
 
 dotenv.load_dotenv()
@@ -14,7 +17,15 @@ app = Flask(__name__)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Initialize Perplexity client
+perplexity_client = OpenAI(
+    api_key=PERPLEXITY_API_KEY,
+    base_url="https://api.perplexity.ai"
+)
 
 CHART_FOLDER = 'static'
 os.makedirs(CHART_FOLDER, exist_ok=True)
@@ -33,7 +44,7 @@ def insert_trades_from_csv(file_path):
         df = pd.read_csv(file_path)
         for col in ['Profit', 'Cum. net profit', 'Entry price', 'Exit price', 'Qty', 'MAE', 'MFE']:
             if col in df.columns:
-                df[col] = df[col].replace({'\$': '', ',': ''}, regex=True)
+                df[col] = df[col].replace({r'\$': '', ',': ''}, regex=True)
                 try:
                     df[col] = pd.to_numeric(df[col])
                 except:
@@ -73,7 +84,6 @@ def get_trades_df(account='all', start_date=None, end_date=None):
     print("About to query Supabase...")
     query = supabase.table('trades').select('*')
 
-    # Default to start of current week (Monday) if no dates specified
     if not start_date and not end_date:
         today = datetime.now()
         days_since_monday = today.weekday()
@@ -102,7 +112,6 @@ def get_trades_df(account='all', start_date=None, end_date=None):
         response = query.execute()
         print("Supabase response received.")
 
-        # Check for Supabase-specific errors in response
         if hasattr(response, 'error') and response.error:
             print(f"Supabase API error: {response.error}")
             return pd.DataFrame()
@@ -292,6 +301,9 @@ HTML_TEMPLATE = """
         .container { max-width: 1400px; margin: 0 auto; }
         h1 { font-size: 2rem; margin-bottom: 20px; color: #111; }
         .account-label { background: #007bff; color: white; padding: 4px 12px; border-radius: 4px; font-size: 0.9rem; margin-left: 10px; }
+        .nav { margin-bottom: 20px; }
+        .nav a { padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 4px; margin-right: 10px; display: inline-block; }
+        .nav a:hover { background: #0056b3; }
         .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; flex-wrap: wrap; gap: 15px; }
         .upload-section form { display: flex; gap: 10px; align-items: center; }
         .upload-section input[type="file"] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
@@ -322,6 +334,10 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <h1>📊 Futures Trade Journal{% if current_account and current_account != 'all' %}<span class="account-label">{{ current_account }}</span>{% endif %}</h1>
+        
+        <div class="nav">
+            <a href="/analysis">🔍 Trade Analysis</a>
+        </div>
         
         <div class="quick-filters">
             <a href="/?start_date={{ today }}&end_date={{ today }}" class="btn-quick">Today</a>
@@ -454,6 +470,163 @@ HTML_TEMPLATE = """
 </html>
 """
 
+ANALYSIS_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Trade Analysis - Futures Journal</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { font-size: 2rem; margin-bottom: 20px; color: #111; }
+        .nav { margin-bottom: 20px; }
+        .nav a { padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 4px; margin-right: 10px; }
+        .nav a:hover { background: #0056b3; }
+        .quick-filters { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+        .btn-quick { padding: 8px 16px; background: #f0f0f0; border: 1px solid #ddd; border-radius: 4px; text-decoration: none; color: #333; font-size: 0.9rem; }
+        .controls { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; }
+        .controls select, .controls input { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; }
+        table { width: 100%; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        table th, table td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        table th { background: #f9f9f9; font-weight: 600; font-size: 0.9rem; color: #666; }
+        .profit-positive { color: #28a745; font-weight: 600; }
+        .profit-negative { color: #dc3545; font-weight: 600; }
+        #analyze-btn { padding: 12px 24px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: 500; }
+        #analyze-btn:hover { background: #0056b3; }
+        #analyze-btn:disabled { background: #ccc; cursor: not-allowed; }
+        #analysis-results { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-top: 20px; display: none; }
+        .analysis-box { line-height: 1.6; white-space: pre-wrap; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #007bff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; display: none; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Trade Analysis</h1>
+        
+        <div class="nav">
+            <a href="/">← Back to Dashboard</a>
+        </div>
+        
+        <div class="quick-filters">
+            <a href="/analysis?start_date={{ today }}&end_date={{ today }}" class="btn-quick">Today</a>
+            <a href="/analysis" class="btn-quick">This Week</a>
+            <a href="/analysis?start_date={{ first_of_month }}" class="btn-quick">This Month</a>
+            <a href="/analysis?start_date=&end_date=" class="btn-quick">All Time</a>
+        </div>
+        
+        <div class="controls">
+            <form method="get" action="/analysis" style="display: flex; gap: 10px; align-items: center;">
+                {% if accounts %}
+                <select name="account" onchange="this.form.submit()">
+                    <option value="all" {% if current_account == 'all' %}selected{% endif %}>All Accounts</option>
+                    {% for acc in accounts %}
+                        <option value="{{ acc }}" {% if current_account == acc %}selected{% endif %}>{{ acc }}</option>
+                    {% endfor %}
+                </select>
+                {% endif %}
+                <label>From:</label>
+                <input type="date" name="start_date" value="{{ start_date|default('') }}" onchange="this.form.submit()">
+                <label>To:</label>
+                <input type="date" name="end_date" value="{{ end_date|default('') }}" onchange="this.form.submit()">
+            </form>
+            <button id="analyze-btn">Analyze Selected Trades</button>
+        </div>
+        
+        {% if trades %}
+        <table>
+            <thead>
+                <tr>
+                    <th><input type="checkbox" id="select-all"></th>
+                    <th>Date/Time</th>
+                    <th>Instrument</th>
+                    <th>Strategy</th>
+                    <th>Position</th>
+                    <th>Entry</th>
+                    <th>Exit</th>
+                    <th>P&L</th>
+                    <th>MAE</th>
+                    <th>MFE</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for trade in trades %}
+                <tr>
+                    <td><input type="checkbox" class="trade-checkbox" value="{{ trade.id }}"></td>
+                    <td>{{ trade.exit_time_display }}</td>
+                    <td>{{ trade.instrument }}</td>
+                    <td>{{ trade.strategy }}</td>
+                    <td>{{ trade.market_pos }}</td>
+                    <td>${{ "%.2f"|format(trade.entry_price) }}</td>
+                    <td>${{ "%.2f"|format(trade.exit_price) }}</td>
+                    <td class="{% if trade.profit > 0 %}profit-positive{% else %}profit-negative{% endif %}">${{ "%.2f"|format(trade.profit) }}</td>
+                    <td>${{ "%.2f"|format(trade.mae) }}</td>
+                    <td>${{ "%.2f"|format(trade.mfe) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="text-align: center; color: #999; margin-top: 40px;">No trades found for the selected filters.</p>
+        {% endif %}
+        
+        <div class="loader" id="loader"></div>
+        <div id="analysis-results"></div>
+    </div>
+    
+    <script>
+    document.getElementById('select-all').addEventListener('change', function() {
+        document.querySelectorAll('.trade-checkbox').forEach(cb => cb.checked = this.checked);
+    });
+    
+    document.getElementById('analyze-btn').addEventListener('click', async () => {
+        const selected = Array.from(document.querySelectorAll('.trade-checkbox:checked'))
+            .map(cb => cb.value);
+        
+        if (selected.length === 0) {
+            alert('Please select at least one trade to analyze');
+            return;
+        }
+        
+        const btn = document.getElementById('analyze-btn');
+        const loader = document.getElementById('loader');
+        const results = document.getElementById('analysis-results');
+        
+        btn.disabled = true;
+        btn.textContent = 'Analyzing...';
+        loader.style.display = 'block';
+        results.style.display = 'none';
+        
+        try {
+            const response = await fetch('/analyze', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({trade_ids: selected})
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                results.innerHTML = '<h2>AI Analysis Results</h2><div class="analysis-box">' + 
+                    result.analysis.replace(/\n/g, '<br>') + '</div>';
+                results.style.display = 'block';
+            } else {
+                alert('Analysis failed: ' + result.error);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Analyze Selected Trades';
+            loader.style.display = 'none';
+        }
+    });
+    </script>
+</body>
+</html>
+"""
+
 
 @app.route("/", methods=["GET"])
 def index():
@@ -470,7 +643,6 @@ def index():
         df) if account == 'all' else None
     charts = create_charts(df, account)
 
-    # For quick filter buttons
     today = datetime.now().strftime('%Y-%m-%d')
     first_of_month = datetime.now().replace(day=1).strftime('%Y-%m-%d')
 
@@ -488,6 +660,79 @@ def index():
         first_of_month=first_of_month,
         timestamp=datetime.now().timestamp()
     )
+
+
+@app.route("/analysis", methods=["GET"])
+def analysis():
+    account = request.args.get('account', 'all')
+    start_date = request.args.get('start_date', None)
+    end_date = request.args.get('end_date', None)
+
+    df = get_trades_df(account, start_date, end_date)
+    accounts = get_account_list()
+
+    trades_list = df.to_dict('records') if not df.empty else []
+
+    for trade in trades_list:
+        if trade.get('exit_time'):
+            trade['exit_time_display'] = pd.to_datetime(
+                trade['exit_time']).strftime('%Y-%m-%d %H:%M')
+
+    today = datetime.now().strftime('%Y-%m-%d')
+    first_of_month = datetime.now().replace(day=1).strftime('%Y-%m-%d')
+
+    return render_template_string(
+        ANALYSIS_TEMPLATE,
+        trades=trades_list,
+        accounts=accounts,
+        current_account=account,
+        start_date=start_date,
+        end_date=end_date,
+        today=today,
+        first_of_month=first_of_month
+    )
+
+
+@app.route("/analyze", methods=["POST"])
+def analyze_trades():
+    trade_ids = request.json.get('trade_ids', [])
+
+    if not trade_ids:
+        return jsonify({"success": False, "error": "No trades selected"}), 400
+
+    trades_data = []
+    for trade_id in trade_ids:
+        response = supabase.table('trades').select(
+            '*').eq('id', trade_id).execute()
+        if response.data:
+            trades_data.append(response.data[0])
+
+    analysis_prompt = f"""You are an expert futures trading analyst. Analyze the following trades and provide specific feedback:
+
+For each trade, evaluate:
+1. **Entry Quality**: Was the entry price optimal? Consider the MAE (Maximum Adverse Excursion) to assess if entry could have been better.
+2. **Exit Quality**: Was the exit optimal? Consider the MFE (Maximum Favorable Excursion) to see if profit was left on the table.
+3. **Risk Management**: Analyze the profit vs MAE/MFE ratio.
+4. **Execution**: Rate the overall trade execution (1-10).
+
+Trades to analyze:
+{json.dumps(trades_data, indent=2)}
+
+Provide actionable feedback for improvement. Be specific and practical."""
+
+    try:
+        response = perplexity_client.chat.completions.create(
+            model="llama-3.1-sonar-large-128k-online",
+            messages=[
+                {"role": "system", "content": "You are an expert futures trading analyst with deep knowledge of price action, risk management, and execution optimization."},
+                {"role": "user", "content": analysis_prompt}
+            ]
+        )
+        analysis = response.choices[0].message.content
+        return jsonify({"success": True, "analysis": analysis})
+    except Exception as e:
+        print(f"Perplexity API error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/upload", methods=["POST"])
