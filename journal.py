@@ -572,114 +572,110 @@ ANALYSIS_TEMPLATE = """
         <div id="analysis-results"></div>
     </div>
     
-    <script>
-    // Debug mode - set to true/false to enable/disable logging
-    const DEBUG = localStorage.getItem('debug-mode') === 'true';
+<script defer>
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('JavaScript loaded...');
+
+    // Ensure elements exist
+    const analyzeBtn = document.getElementById('analyze-btn');
+    const debugBtn = document.getElementById('debug-btn');
+    const loader = document.getElementById('loader');
+    const results = document.getElementById('analysis-results');
+    const selectAll = document.getElementById('select-all');
+
+    if (!analyzeBtn || !debugBtn) {
+        console.error('Critical elements not found — check button IDs.');
+        return;
+    }
+
+    // Load debug mode state
+    let DEBUG = localStorage.getItem('debug-mode') === 'true';
+    debugBtn.style.background = DEBUG ? '#28a745' : '#6c757d';
 
     function debugLog(...args) {
-        if (DEBUG) {
-            console.log('[ANALYSIS DEBUG]', ...args);
-        }
+        if (DEBUG) console.log('[ANALYSIS DEBUG]', ...args);
     }
 
     function debugError(...args) {
-        if (DEBUG) {
-            console.error('[ANALYSIS ERROR]', ...args);
-        }
+        if (DEBUG) console.error('[ANALYSIS ERROR]', ...args);
     }
 
-    // Debug button functionality
-    document.getElementById('debug-btn').addEventListener('click', function() {
-        const newDebugState = localStorage.getItem('debug-mode') !== 'true';
-        localStorage.setItem('debug-mode', newDebugState);
-        console.log('DEBUG MODE TOGGLED:', newDebugState ? 'ON' : 'OFF');
-        alert('Debug Mode: ' + (newDebugState ? 'ON ✅' : 'OFF ❌'));
-        this.style.background = newDebugState ? '#28a745' : '#6c757d';
+    // Toggle Debug
+    debugBtn.addEventListener('click', function() {
+        DEBUG = !DEBUG;
+        localStorage.setItem('debug-mode', DEBUG);
+        alert('Debug Mode: ' + (DEBUG ? 'ON ✅' : 'OFF ❌'));
+        debugBtn.style.background = DEBUG ? '#28a745' : '#6c757d';
+        console.log('DEBUG MODE TOGGLED:', DEBUG ? 'ON' : 'OFF');
     });
 
-    // Update button color on page load
-    window.addEventListener('load', function() {
-        const debugBtn = document.getElementById('debug-btn');
-        const isDebugOn = localStorage.getItem('debug-mode') === 'true';
-        debugBtn.style.background = isDebugOn ? '#28a745' : '#6c757d';
-    });
-
-    document.getElementById('select-all').addEventListener('change', function() {
+    // Select all trades
+    selectAll?.addEventListener('change', function() {
         document.querySelectorAll('.trade-checkbox').forEach(cb => cb.checked = this.checked);
     });
 
-    document.getElementById('analyze-btn').addEventListener('click', async () => {
+    // Analyze Selected Trades
+    analyzeBtn.addEventListener('click', async () => {
         debugLog('Analyze button clicked');
-        
-        const selected = Array.from(document.querySelectorAll('.trade-checkbox:checked'))
-            .map(cb => cb.value);
-        
-        debugLog('Selected trades:', selected);
-        
+
+        const selected = Array.from(document.querySelectorAll('.trade-checkbox:checked')).map(cb => cb.value);
         if (selected.length === 0) {
             alert('Please select at least one trade to analyze');
             return;
         }
-        
-        const btn = document.getElementById('analyze-btn');
-        const loader = document.getElementById('loader');
-        const results = document.getElementById('analysis-results');
-        
-        btn.disabled = true;
-        btn.textContent = 'Analyzing...';
+
+        analyzeBtn.disabled = true;
+        analyzeBtn.textContent = 'Analyzing...';
         loader.style.display = 'block';
         results.style.display = 'none';
         results.innerHTML = '';
-        
+
         try {
-            debugLog('Sending request to /analyze...');
-            
             const response = await fetch('/analyze', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({trade_ids: selected})
             });
-            
-            debugLog('Response status:', response.status);
-            debugLog('Response headers:', response.headers.get('content-type'));
-            
+
             if (!response.ok) {
-                const errorText = await response.text();
-                debugError('Error response:', errorText);
-                throw new Error(`HTTP Error ${response.status}`);
+                throw new Error(`HTTP error ${response.status}`);
             }
-            
+
             const result = await response.json();
             debugLog('Analysis result:', result);
-            
+
             if (result.success) {
-                debugLog('Success! Displaying results...');
-                
-                // Create results HTML
-                let html = '<h2>AI Analysis Results</h2>';
-                html += '<div class="analysis-box">' + result.analysis.split('\n').join('<br>') + '</div>';
-                
+                let html = '<h2>AI Analysis Results</h2><div class="analysis-box">'
+                         + result.analysis.split('\n').join('<br>') + '</div>';
                 results.innerHTML = html;
                 results.style.display = 'block';
-                
-                debugLog('Results displayed successfully');
             } else {
                 debugError('Analysis failed:', result.error);
                 alert('Analysis failed: ' + (result.error || 'Unknown error'));
             }
         } catch (error) {
-            debugError('Error:', error);
+            debugError('Unexpected Error:', error);
             alert('Error: ' + error.message);
         } finally {
-            btn.disabled = false;
-            btn.textContent = 'Analyze Selected Trades';
+            analyzeBtn.disabled = false;
+            analyzeBtn.textContent = 'Analyze Selected Trades';
             loader.style.display = 'none';
         }
     });
-    </script>
+});
+</script>
+
 </body>
 </html>
 """
+
+# Health check endpoint to handle HEAD requests without querying database
+
+
+@app.route("/", methods=["HEAD"])
+@app.route("/analysis", methods=["HEAD"])
+def health_check():
+    return '', 200
 
 
 @app.route("/", methods=["GET"])
