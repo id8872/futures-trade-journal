@@ -568,60 +568,82 @@ ANALYSIS_TEMPLATE = """
         <div class="loader" id="loader"></div>
         <div id="analysis-results"></div>
     </div>
-    
+
     <script>
     document.getElementById('select-all').addEventListener('change', function() {
-        document.querySelectorAll('.trade-checkbox').forEach(cb => cb.checked = this.checked);
+    document.querySelectorAll('.trade-checkbox').forEach(cb => cb.checked = this.checked);
     });
 
     document.getElementById('analyze-btn').addEventListener('click', async () => {
-        const selected = Array.from(document.querySelectorAll('.trade-checkbox:checked'))
-            .map(cb => cb.value);
+    console.log('Analyze button clicked');
+    
+    const selected = Array.from(document.querySelectorAll('.trade-checkbox:checked'))
+        .map(cb => cb.value);
+    
+    console.log('Selected trades:', selected);
+    
+    if (selected.length === 0) {
+        alert('Please select at least one trade to analyze');
+        return;
+    }
+    
+    const btn = document.getElementById('analyze-btn');
+    const loader = document.getElementById('loader');
+    const results = document.getElementById('analysis-results');
+    
+    btn.disabled = true;
+    btn.textContent = 'Analyzing...';
+    loader.style.display = 'block';
+    results.style.display = 'none';
+    results.innerHTML = '';
+    
+    try {
+        console.log('Sending request to /analyze...');
         
-        if (selected.length === 0) {
-            alert('Please select at least one trade to analyze');
-            return;
+        const response = await fetch('/analyze', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({trade_ids: selected})
+        });
+        
+        console.log('Response status:', response.status);
+        console.log('Response headers:', response.headers.get('content-type'));
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Error response:', errorText);
+            throw new Error(`HTTP Error ${response.status}`);
         }
         
-        const btn = document.getElementById('analyze-btn');
-        const loader = document.getElementById('loader');
-        const results = document.getElementById('analysis-results');
+        const result = await response.json();
+        console.log('Analysis result:', result);
         
-        btn.disabled = true;
-        btn.textContent = 'Analyzing...';
-        loader.style.display = 'block';
-        results.style.display = 'none';
-        
-        try {
-            const response = await fetch('/analyze', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({trade_ids: selected})
-            });
+        if (result.success) {
+            console.log('Success! Displaying results...');
             
-            const result = await response.json();
+            // Create results HTML
+            let html = '<h2>AI Analysis Results</h2>';
+            html += '<div class="analysis-box">' + result.analysis.replace(/\n/g, '<br>') + '</div>';
             
-            if (result.success) {
-                const analysisDiv = document.createElement('div');
-                analysisDiv.className = 'analysis-box';
-                analysisDiv.textContent = result.analysis;
-                
-                results.innerHTML = '<h2>AI Analysis Results</h2>';
-                results.appendChild(analysisDiv);
-                results.style.display = 'block';
-            } else {
-                alert('Analysis failed: ' + result.error);
-            }
-        } catch (error) {
-            alert('Error: ' + error.message);
-            console.error('Analysis error:', error);
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Analyze Selected Trades';
-            loader.style.display = 'none';
+            results.innerHTML = html;
+            results.style.display = 'block';
+            
+            console.log('Results displayed successfully');
+        } else {
+            console.error('Analysis failed:', result.error);
+            alert('Analysis failed: ' + (result.error || 'Unknown error'));
         }
-    });
-    </script>
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Analyze Selected Trades';
+        loader.style.display = 'none';
+    }
+});
+</script>
+
 </body>
 </html>
 """
