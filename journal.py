@@ -730,7 +730,7 @@ Provide actionable feedback for improvement. Be specific and practical."""
 
     try:
         response = perplexity_client.chat.completions.create(
-            model="llama-3.1-sonar-large-128k-online",
+            model="llama-3-sonar-large-32k-online",
             messages=[
                 {"role": "system", "content": "You are an expert futures trading analyst with deep knowledge of price action, risk management, and execution optimization."},
                 {"role": "user", "content": analysis_prompt}
